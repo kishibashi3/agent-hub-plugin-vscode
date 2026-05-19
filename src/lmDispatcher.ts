@@ -228,13 +228,35 @@ export class LmDispatcher {
       return;
     }
 
-    // Step 5 replaces this with a real `send_message` relay. The Step 3
-    // landing point is a visible LM response in the output channel so the
-    // pipeline can be inspected end-to-end before reply infrastructure
-    // arrives.
+    // Step 5: relay the LM response back via `send_message` BEFORE
+    // marking the message read. The order matters — if the relay fails
+    // (server restart, stale session, recipient deleted, …) we want the
+    // message to stay in the inbox so the next drain retries.
+    //
+    // The full response text is still logged to the output channel as a
+    // `[reply-sent]` breadcrumb so an operator can audit what got
+    // forwarded without correlating with the agent-hub server logs.
+    const replyClient = this.requireClient();
+    if (!replyClient) {
+      this.deps.log(
+        `[WARN] watcher lost session before reply for msg=${msg.id} — ` +
+          'message will be redelivered on the next drain'
+      );
+      return;
+    }
+    try {
+      await replyClient.sendMessage(msg.from, responseText);
+    } catch (err) {
+      this.deps.log(
+        `[ERR] send_message to=${msg.from} msg=${msg.id}: ${errMsg(err)} — ` +
+          'leaving message unread for retry'
+      );
+      return;
+    }
     this.deps.log(
-      `[response] to=${msg.from} model=${model.id} msg=${msg.id}\n` +
-        `--- begin response ---\n${responseText}\n--- end response ---`
+      `[reply-sent] to=${msg.from} model=${model.id} msg=${msg.id} ` +
+        `chars=${responseText.length}\n` +
+        `--- begin reply ---\n${responseText}\n--- end reply ---`
     );
 
     await this.markRead(msg);
