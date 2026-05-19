@@ -37,10 +37,14 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand('agentHubBridge.status', () => {
       const cfg = vscode.workspace.getConfiguration('agentHubBridge');
-      const url = cfg.get<string>('url') ?? '';
-      const user = cfg.get<string>('user') ?? '';
-      const tenant = cfg.get<string>('tenant') ?? '(default)';
-      const summary = `agent-hub bridge — url=${url} user=${user || '(unset)'} tenant=${tenant} state=not-started`;
+      // Note: VS Code config returns "" for unset string keys (default declared in
+      // package.json), never undefined. Use `||` everywhere so empty-string falls
+      // through to the placeholder — `??` would only catch undefined and leave
+      // the empty string in place (cosmetic bug, but easy to get wrong).
+      const url = cfg.get<string>('url') || '';
+      const user = cfg.get<string>('user') || '(unset)';
+      const tenant = cfg.get<string>('tenant') || '(default)';
+      const summary = `agent-hub bridge — url=${url} user=${user} tenant=${tenant} state=not-started`;
       log(summary);
       void vscode.window.showInformationMessage(summary);
     })

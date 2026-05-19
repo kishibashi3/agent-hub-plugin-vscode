@@ -36,7 +36,7 @@ Available under `agentHubBridge.*`:
 
 | Setting | Default | Notes |
 |---|---|---|
-| `agentHubBridge.url` | `http://localhost:3000/mcp` | agent-hub MCP endpoint |
+| `agentHubBridge.url` | `http://localhost:3000/mcp` | agent-hub MCP endpoint. **Default is a dev-localhost value — override before connecting to any non-local deployment.** Production / Pi5 / remote tenants must set this explicitly; the follow-up SSE-watch PR will additionally `console.warn` (or refuse to start) when this is left at the default in a non-dev environment, per the ecosystem "no silent production fallback" rule (= redline #1). |
 | `agentHubBridge.user` | (empty) | Handle (trust mode) / override (pat mode) |
 | `agentHubBridge.tenant` | (empty = default tenant) | `X-Tenant-Id` |
 | `agentHubBridge.githubPat` | (empty) | PAT (pat mode); migrate to secret storage in a follow-up |
