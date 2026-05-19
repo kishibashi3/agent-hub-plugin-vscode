@@ -34,12 +34,16 @@ export interface IdeContextOptions {
   readonly windowLinesAroundCursor: number;
 }
 
-export const DEFAULT_IDE_CONTEXT_OPTIONS: IdeContextOptions = {
+// Frozen for `EMPTY_IDE_CONTEXT_SNAPSHOT` parity (PR #5 Suggestion 2) — a
+// caller that accidentally mutates `DEFAULT_IDE_CONTEXT_OPTIONS.enabled = false`
+// would otherwise quietly disable context for everyone else sharing the
+// reference.
+export const DEFAULT_IDE_CONTEXT_OPTIONS: IdeContextOptions = Object.freeze({
   enabled: true,
   maxSelectionChars: 4000,
   maxDiagnostics: 20,
   windowLinesAroundCursor: 20,
-};
+});
 
 export type DiagnosticSeverityLabel = 'error' | 'warning' | 'info' | 'hint';
 
@@ -118,7 +122,7 @@ export function collectIdeContext(opts: IdeContextOptions): IdeContextSnapshot {
   let sel: IdeSelection | undefined;
   let window: IdeCursorWindow | undefined;
 
-  if (!selection.isEmpty) {
+  if (!selection.isEmpty && opts.maxSelectionChars > 0) {
     const rawText = doc.getText(selection);
     const truncated = rawText.length > opts.maxSelectionChars;
     sel = {
@@ -127,6 +131,15 @@ export function collectIdeContext(opts: IdeContextOptions): IdeContextSnapshot {
       text: truncated ? rawText.slice(0, opts.maxSelectionChars) + '…' : rawText,
       truncated,
     };
+  } else if (!selection.isEmpty && opts.maxSelectionChars === 0) {
+    // PR #5 Minor (path a): `maxSelectionChars = 0` is a privacy switch
+    // that suppresses the *selection* block — we deliberately do NOT
+    // fall through to the cursor-window branch because the user has
+    // a selection and asked us not to share its contents. The user can
+    // independently set `windowLinesAroundCursor = 0` if they want the
+    // surrounding window suppressed as well; the two caps are
+    // orthogonal "0 = off" knobs matching `maxDiagnostics = 0`.
+    sel = undefined;
   } else if (opts.windowLinesAroundCursor > 0) {
     const w = opts.windowLinesAroundCursor;
     const startLine = Math.max(0, cursor.line - w);

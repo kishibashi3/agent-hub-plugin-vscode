@@ -240,6 +240,25 @@ export class AgentHubClient {
   }
 
   /**
+   * Sends a DM (or team-broadcast, when `to` is a `@team-name`) via the
+   * `send_message` MCP tool. The Step 5 reply path uses this to relay
+   * the LM response back to the original sender.
+   *
+   * On `isError: true` the handler's text payload is surfaced as the
+   * thrown error so the dispatcher can leave the message unread and
+   * retry on the next drain.
+   */
+  async sendMessage(to: string, message: string): Promise<void> {
+    const result = await this.callTool('send_message', { to, message });
+    const r = result as { isError?: boolean; content?: Array<{ type?: unknown; text?: unknown }> };
+    if (r.isError) {
+      const first = Array.isArray(r.content) ? r.content[0] : undefined;
+      const text = typeof first?.text === 'string' ? first.text : '(no detail)';
+      throw new Error(`send_message: ${text}`);
+    }
+  }
+
+  /**
    * Marks one message as read. Idempotent server-side, but the handler
    * returns `isError: true` when the message id is unknown or not owned
    * by the caller — we surface that as a thrown error so the caller can
