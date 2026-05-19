@@ -187,6 +187,13 @@ export class InboxWatcher {
     void this.runLoop(auth);
   }
 
+  /*
+   * Keep the Promise return type so callers can `await w.stop()`
+   * consistently; the body is synchronous today but the abort + future
+   * cleanup could grow async work (e.g. flushing an in-flight tool
+   * call) without changing this signature.
+   */
+  // eslint-disable-next-line @typescript-eslint/require-await
   async stop(): Promise<void> {
     if (!this.running) return;
     this.running = false;
@@ -350,17 +357,21 @@ export class InboxWatcher {
     if (!body) {
       throw new Error('SSE GET failed: response has no body');
     }
-    const reader = body.getReader();
+    // Narrow the reader type so the destructure of `read()` returns a
+    // typed `Uint8Array` chunk — `body.getReader()` is generic and some
+    // lib.dom.d.ts versions widen `value` to `any`, which trips the
+    // type-aware no-unsafe-* rules.
+    const reader = body.getReader() as ReadableStreamDefaultReader<Uint8Array>;
     const decoder = new TextDecoder('utf-8');
     let buf = '';
 
     try {
       while (this.running) {
-        const { value, done } = await reader.read();
-        if (done) {
+        const chunk = await reader.read();
+        if (chunk.done) {
           throw new Error('SSE stream closed by server');
         }
-        buf += decoder.decode(value, { stream: true });
+        buf += decoder.decode(chunk.value, { stream: true });
 
         // SSE is line-based, terminated by `\n` (and a blank line per event).
         // The agent-hub server emits one JSON object per `data:` line for

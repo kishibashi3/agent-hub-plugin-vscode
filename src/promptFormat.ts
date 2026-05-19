@@ -72,13 +72,13 @@ export const DEFAULT_IDE_CONTEXT_OPTIONS: IdeContextOptions = Object.freeze({
     maxFiles: 5,
     maxCharsPerFile: 1500,
     includeUntracked: false,
-  }) as IdeGitDiffOptions,
+  }),
   multiEditor: Object.freeze({
     maxSecondaryEditors: 3,
-  }) as IdeMultiEditorOptions,
+  }),
   notebook: Object.freeze({
     enabled: true,
-  }) as IdeNotebookOptions,
+  }),
 });
 
 export type DiagnosticSeverityLabel = 'error' | 'warning' | 'info' | 'hint';
