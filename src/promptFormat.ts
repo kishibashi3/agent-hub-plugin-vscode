@@ -13,11 +13,27 @@
 
 import type { InboxMessage } from './protocol';
 
+export interface IdeGitDiffOptions {
+  /**
+   * Opt-in. Diffs can carry sensitive working-tree state, so we require
+   * an explicit user choice per workspace — unlike the rest of
+   * `IdeContextOptions` (`enabled = true` by default).
+   */
+  readonly enabled: boolean;
+  /** Cap on number of files included in the prompt. `0` suppresses all file diffs. */
+  readonly maxFiles: number;
+  /** Per-file diff truncation. `0` suppresses per-file diff bodies (path + status only). */
+  readonly maxCharsPerFile: number;
+  /** Whether `?? untracked.txt` entries appear. */
+  readonly includeUntracked: boolean;
+}
+
 export interface IdeContextOptions {
   readonly enabled: boolean;
   readonly maxSelectionChars: number;
   readonly maxDiagnostics: number;
   readonly windowLinesAroundCursor: number;
+  readonly gitDiff: IdeGitDiffOptions;
 }
 
 // Frozen for `EMPTY_IDE_CONTEXT_SNAPSHOT` parity (PR #5 Suggestion 2) — a
@@ -29,6 +45,12 @@ export const DEFAULT_IDE_CONTEXT_OPTIONS: IdeContextOptions = Object.freeze({
   maxSelectionChars: 4000,
   maxDiagnostics: 20,
   windowLinesAroundCursor: 20,
+  gitDiff: Object.freeze({
+    enabled: false, // intentional: opt-in vs. the rest of the snapshot
+    maxFiles: 5,
+    maxCharsPerFile: 1500,
+    includeUntracked: false,
+  }) as IdeGitDiffOptions,
 });
 
 export type DiagnosticSeverityLabel = 'error' | 'warning' | 'info' | 'hint';
@@ -63,17 +85,120 @@ export interface IdeCursorWindow {
   readonly text: string;
 }
 
+export type IdeGitChangeStatus =
+  | 'modified'
+  | 'added'
+  | 'deleted'
+  | 'renamed'
+  | 'untracked'
+  | 'conflicted'
+  | 'other';
+
+export interface IdeGitChange {
+  /** Workspace-relative path, forward-slashed. */
+  readonly path: string;
+  readonly status: IdeGitChangeStatus;
+  /** Unified-diff body, truncated per `maxCharsPerFile`. Empty when bodies are suppressed (`maxCharsPerFile = 0`) or when the diff fetch failed. */
+  readonly diff: string;
+  readonly diffTruncated: boolean;
+}
+
+export interface IdeGitDiff {
+  /** Workspace-relative repo path (empty string when the repo IS the workspace root). */
+  readonly repoPath: string;
+  /** `Branch.name` from `vscode.git`. Empty string when detached / unknown. */
+  readonly branchName: string;
+  readonly changes: readonly IdeGitChange[];
+  /** Number of files hidden by `maxFiles`. */
+  readonly truncatedFileCount: number;
+}
+
 export interface IdeContextSnapshot {
   readonly activeFile?: IdeActiveFile;
   readonly selection?: IdeSelection;
   readonly cursorWindow?: IdeCursorWindow;
   readonly diagnostics: readonly IdeDiagnostic[];
+  readonly gitDiff?: IdeGitDiff;
 }
 
 /** Sentinel snapshot returned when context is disabled or no editor is focused. */
 export const EMPTY_IDE_CONTEXT_SNAPSHOT: IdeContextSnapshot = Object.freeze({
   diagnostics: Object.freeze([]),
 });
+
+/**
+ * Truncate a unified-diff body to at most `maxChars` characters, marking
+ * whether truncation happened. Pure function — exported for unit-testing.
+ *
+ * Behaviour pinned by tests:
+ *   - `maxChars = 0` returns `{ text: '', truncated: input.length > 0 }`
+ *     so callers can render "diff body suppressed (1500 chars omitted)"
+ *     without re-checking the cap.
+ *   - Truncation slices at the character boundary (UTF-16 code units),
+ *     matching what `String#length` reports. UTF-32 codepoint splitting
+ *     isn't worth the complexity for a diff renderer aimed at an LM.
+ *   - The trailing newline (if any) is preserved when not truncated so
+ *     fenced code blocks render cleanly.
+ */
+export function truncateDiff(
+  diff: string,
+  maxChars: number
+): { readonly text: string; readonly truncated: boolean } {
+  if (maxChars <= 0) {
+    return { text: '', truncated: diff.length > 0 };
+  }
+  if (diff.length <= maxChars) {
+    return { text: diff, truncated: false };
+  }
+  return { text: diff.slice(0, maxChars), truncated: true };
+}
+
+/**
+ * Render an `IdeGitDiff` snapshot as a markdown block. Returns the empty
+ * string when there's nothing to render (no changes AND no truncated
+ * count), so `formatIdeContext` can drop the section cleanly. Pure
+ * function — exported for unit-testing.
+ *
+ * `maxCharsPerFile = 0` means "names + status only, no diff body" — the
+ * fenced block per file collapses to a one-liner annotation.
+ */
+export function formatGitDiffBlock(diff: IdeGitDiff, maxCharsPerFile: number): string {
+  if (diff.changes.length === 0 && diff.truncatedFileCount === 0) {
+    return '';
+  }
+
+  const headerParts: string[] = [];
+  if (diff.branchName.length > 0) {
+    headerParts.push(`branch=${diff.branchName}`);
+  }
+  if (diff.repoPath.length > 0) {
+    headerParts.push(`repo=${diff.repoPath}`);
+  }
+  headerParts.push(`${diff.changes.length} file(s)`);
+  if (diff.truncatedFileCount > 0) {
+    headerParts.push(`+ ${diff.truncatedFileCount} more truncated`);
+  }
+  const header = `### Git diff (working tree, ${headerParts.join(', ')})`;
+
+  const lines: string[] = [header, ''];
+
+  for (const change of diff.changes) {
+    lines.push(`#### \`${change.path}\` — ${change.status}`);
+    if (maxCharsPerFile <= 0 || change.diff.length === 0) {
+      lines.push('_diff body suppressed_');
+    } else {
+      lines.push('```diff');
+      lines.push(change.diff);
+      if (change.diffTruncated) {
+        lines.push('… (truncated)');
+      }
+      lines.push('```');
+    }
+    lines.push('');
+  }
+
+  return lines.join('\n').trimEnd();
+}
 
 /**
  * Render an `IdeContextSnapshot` as a markdown block embedded in the LM
@@ -122,6 +247,19 @@ export function formatIdeContext(snapshot: IdeContextSnapshot): string {
       parts.push(`- line ${d.line} ${d.severity}: ${src}${d.message}`);
     }
     parts.push('');
+  }
+
+  if (snapshot.gitDiff) {
+    // `formatGitDiffBlock` returns its own internal trim, so we treat it
+    // as an opaque chunk. The per-file max here is implied by the diff
+    // bodies already having been truncated by `collectGitDiff`; we pass
+    // `Number.MAX_SAFE_INTEGER` to avoid re-truncating inside the
+    // formatter (which would mis-classify already-truncated bodies).
+    const gitBlock = formatGitDiffBlock(snapshot.gitDiff, Number.MAX_SAFE_INTEGER);
+    if (gitBlock.length > 0) {
+      parts.push(gitBlock);
+      parts.push('');
+    }
   }
 
   return parts.join('\n').trimEnd();

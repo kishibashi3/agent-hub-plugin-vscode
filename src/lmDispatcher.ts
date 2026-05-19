@@ -62,7 +62,9 @@ export interface LmDispatcherDeps {
    * real `collectIdeContext` which reads `vscode.window.activeTextEditor`
    * + `vscode.languages.getDiagnostics` at call time.
    */
-  readonly collectIdeContext?: (opts: IdeContextOptions) => IdeContextSnapshot;
+  readonly collectIdeContext?: (
+    opts: IdeContextOptions
+  ) => IdeContextSnapshot | Promise<IdeContextSnapshot>;
 }
 
 // `formatPrompt` is re-exported above; the implementation now lives in
@@ -86,7 +88,9 @@ export class LmDispatcher {
   private readonly selectChatModels: (
     selector: vscode.LanguageModelChatSelector
   ) => Thenable<vscode.LanguageModelChat[]>;
-  private readonly collectIdeContext: (opts: IdeContextOptions) => IdeContextSnapshot;
+  private readonly collectIdeContext: (
+    opts: IdeContextOptions
+  ) => IdeContextSnapshot | Promise<IdeContextSnapshot>;
 
   constructor(private readonly deps: LmDispatcherDeps) {
     this.selectChatModels = deps.selectChatModels ?? ((s) => vscode.lm.selectChatModels(s));
@@ -166,7 +170,10 @@ export class LmDispatcher {
     // (synchronous read) so order has no real cost; clarity over speed.
     let ideSnapshot: IdeContextSnapshot = EMPTY_IDE_CONTEXT_SNAPSHOT;
     try {
-      ideSnapshot = this.collectIdeContext(this.deps.cfg.ideContext);
+      // Collector may be sync (tests inject a fake) or async (production
+      // reads vscode.git for the optional diff section). `await` handles
+      // both cleanly thanks to the union return type on the dep slot.
+      ideSnapshot = await this.collectIdeContext(this.deps.cfg.ideContext);
     } catch (err) {
       // A throwing IDE snapshotter shouldn't break the pipeline — degrade
       // to "no IDE context" and continue. Log so it's diagnosable.
@@ -183,10 +190,19 @@ export class LmDispatcher {
         : ideSnapshot.cursorWindow
           ? `cursor-window ${ideSnapshot.cursorWindow.startLine}-${ideSnapshot.cursorWindow.endLine}`
           : 'no selection/window';
+      const git = ideSnapshot.gitDiff
+        ? ` gitDiff=${ideSnapshot.gitDiff.changes.length}` +
+          (ideSnapshot.gitDiff.truncatedFileCount > 0
+            ? `+${ideSnapshot.gitDiff.truncatedFileCount}`
+            : '') +
+          (ideSnapshot.gitDiff.branchName.length > 0
+            ? `@${ideSnapshot.gitDiff.branchName}`
+            : '')
+        : '';
       this.deps.log(
         `[ide-context] file=${ideSnapshot.activeFile.uri} ` +
           `lang=${ideSnapshot.activeFile.languageId} ${sel} ` +
-          `diagnostics=${ideSnapshot.diagnostics.length}`
+          `diagnostics=${ideSnapshot.diagnostics.length}${git}`
       );
     } else if (this.deps.cfg.ideContext.enabled) {
       // Enabled but no editor focused — note it once per dispatch so the

@@ -4,7 +4,7 @@
 
 IDE-bound bridge for [agent-hub](https://github.com/kishibashi3/agent-hub). Runs as a VS Code extension and relays DMs into the VS Code Language Model API (Copilot Chat), with IDE context (active editor, selection, diagnostics) auto-attached.
 
-> **Status:** complete (issue [#1](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/1) — scaffold + SSE inbox watch + LM bridging + IDE-context auto-attach + `send_message` reply relay). Follow-ups: CI ([#7](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/7)), `SecretStorage` migration, `vscode.git` diff attach.
+> **Status:** complete (issue [#1](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/1) — scaffold + SSE inbox watch + LM bridging + IDE-context auto-attach + `send_message` reply relay). Follow-ups shipped: CI ([#7](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/7)), SecretStorage migration ([#9](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/9)), git-diff attach ([#11](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/11)). Remaining: multi-editor / notebook support, `.vsix` packaging / release tagging.
 
 ## Architecture
 
@@ -66,6 +66,10 @@ Available under `agentHubBridge.*`:
 | `agentHubBridge.ideContext.maxSelectionChars` | `4000` | Character cap on selection text; longer selections are truncated. `0` suppresses the selection block entirely (no cursor-window fall-through — pair with `windowLinesAroundCursor=0` if you want no code text shared at all). |
 | `agentHubBridge.ideContext.maxDiagnostics` | `20` | Cap on diagnostics forwarded per dispatch (error-first ordering). `0` suppresses diagnostics. |
 | `agentHubBridge.ideContext.windowLinesAroundCursor` | `20` | Lines of surrounding code forwarded when there's no selection. `0` suppresses the cursor-window block. |
+| `agentHubBridge.ideContext.gitDiff.enabled` | **`false`** | Opt-in working-tree git diff via the bundled `vscode.git` extension. Off by default — diffs can carry sensitive in-flight code. |
+| `agentHubBridge.ideContext.gitDiff.maxFiles` | `5` | Cap on files in the git-diff block. `0` suppresses file diffs (header still shown). |
+| `agentHubBridge.ideContext.gitDiff.maxCharsPerFile` | `1500` | Per-file diff truncation cap. `0` suppresses diff bodies entirely (paths + statuses only). |
+| `agentHubBridge.ideContext.gitDiff.includeUntracked` | `false` | Whether `?? new-file.txt` entries appear. Off by default — new files are often sensitive. |
 
 ## Commands
 
@@ -101,6 +105,25 @@ Cursor: line 42, column 8
 When there's no selection, a configurable window of lines around the caret is included instead. When there's no active text editor (e.g. the user is on the output channel), the block is omitted entirely and a `[ide-context] no active text editor` line is logged.
 
 When the original sender is a `@team-…` handle, the reply goes to the team (matching agent-hub's `send_message` routing). When `LM` returns an empty response the message is left unread — the bridge errs on the side of "no signal is better than a misleading empty reply."
+
+### Git diff (opt-in)
+
+When `agentHubBridge.ideContext.gitDiff.enabled = true`, the snapshot also includes the working-tree diff of the repo owning the active editor. The block looks like:
+
+```
+### Git diff (working tree, branch=feat/x, 3 file(s), + 2 more truncated)
+
+#### `src/a.ts` — modified
+```diff
+@@ -1 +1 @@
+-old
++new
+```
+```
+
+Defaults (`maxFiles=5`, `maxCharsPerFile=1500`, `includeUntracked=false`) keep the prompt within a token-budget range that pairs well with most chat models. All four `gitDiff.*` knobs follow the same "0 = off, N = cap" semantics as the other IDE-context caps.
+
+The integration uses the bundled `vscode.git` extension's exported API (`vscode.extensions.getExtension('vscode.git')`); no shell-out. If `vscode.git` is disabled the diff is silently omitted.
 
 ## Secrets
 
