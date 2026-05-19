@@ -43,7 +43,7 @@ Available under `agentHubBridge.*`:
 
 ## Commands
 
-- `agent-hub bridge: Start inbox watch` — open an MCP session, subscribe to `inbox://@<user>`, and stream notifications via SSE. Reconnects automatically (3 s back-off) on disconnect. Pre-flight: warns if `agentHubBridge.url` is at the dev-localhost default (redline #1) or `tenant` is unset (then connects to the default tenant).
+- `agent-hub bridge: Start inbox watch` — open an MCP session, subscribe to `inbox://@<user>`, and stream notifications via SSE. Reconnects automatically with exponential back-off (3 s → 6 s → 12 s → … capped at 60 s, reset on every successful re-subscribe). Pre-flight: warns if `agentHubBridge.url` is at the dev-localhost default — both via the output channel and a dismissible popup with an "Open Settings" action (redline #1) — and if `tenant` is unset (then connects to the default tenant).
 - `agent-hub bridge: Stop inbox watch` — aborts the SSE stream and tears down the watcher.
 - `agent-hub bridge: Show connection status` — prints url / user / tenant / auth mode / watcher state / session id snapshot to the output channel and surfaces it as a notification.
 

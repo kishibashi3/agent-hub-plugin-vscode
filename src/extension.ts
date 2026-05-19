@@ -10,6 +10,7 @@ import {
   InboxMessageNotification,
   InboxWatcher,
   LOCALHOST_DEFAULT_URL,
+  isDefaultLocalhostUrl,
 } from './agentHub';
 
 const CHANNEL_NAME = 'agent-hub bridge';
@@ -54,6 +55,31 @@ async function startWatcher(): Promise<void> {
     return;
   }
   const config = readConfig();
+
+  // Redline #1 visibility (per PR #3 reviewer Minor 1): the watcher already
+  // logs a `[WARN]` to the output channel, but a passive log line is easy to
+  // miss when the channel isn't focused. Surface a popup with a one-click
+  // path into Settings so the user can't unknowingly connect a non-local
+  // workspace to localhost. We only fire once per start, dismissible.
+  if (isDefaultLocalhostUrl(config.url)) {
+    void vscode.window
+      .showWarningMessage(
+        'agent-hub bridge: connecting to the dev-localhost default URL ' +
+          `(${LOCALHOST_DEFAULT_URL}). If you intended a non-local deployment, ` +
+          'override agentHubBridge.url first (redline #1: no silent production fallback).',
+        'Open Settings',
+        'Continue'
+      )
+      .then((choice) => {
+        if (choice === 'Open Settings') {
+          void vscode.commands.executeCommand(
+            'workbench.action.openSettings',
+            'agentHubBridge.url'
+          );
+        }
+      });
+  }
+
   const w = new InboxWatcher(config, log);
   // Subscribe before start() so we never miss the first event the watcher
   // emits after subscribe returns.

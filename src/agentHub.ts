@@ -127,6 +127,24 @@ async function fetchGitHubLogin(pat: string): Promise<string | null> {
 }
 
 type Logger = (msg: string) => void;
+type LoginResolver = (pat: string) => Promise<string | null>;
+
+/**
+ * Reconnect back-off, in ms. Doubles per consecutive failure and caps at 60s
+ * so a sustained outage doesn't pin us at 3s pinging forever. Reset to the
+ * starting value on every successful subscribe.
+ *
+ * watch.sh uses a flat 3s `sleep` (no cap, no growth) — we diverge here
+ * intentionally because a long-lived editor session is more likely to ride
+ * out multi-minute outages than a developer-supervised shell.
+ */
+const RECONNECT_BACKOFF_START_MS = 3_000;
+const RECONNECT_BACKOFF_MAX_MS = 60_000;
+
+export function nextBackoffMs(currentMs: number): number {
+  const doubled = currentMs * 2;
+  return doubled >= RECONNECT_BACKOFF_MAX_MS ? RECONNECT_BACKOFF_MAX_MS : doubled;
+}
 
 /**
  * Long-lived inbox watcher. Owns one MCP session + one SSE stream and
@@ -146,11 +164,18 @@ export class InboxWatcher {
   private currentUserId: string | null = null;
   private readonly emitter = new vscode.EventEmitter<InboxMessageNotification>();
   readonly onMessage: vscode.Event<InboxMessageNotification> = this.emitter.event;
+  private readonly loginResolver: LoginResolver;
 
   constructor(
     private readonly cfg: BridgeConfig,
-    private readonly log: Logger
-  ) {}
+    private readonly log: Logger,
+    loginResolver?: LoginResolver
+  ) {
+    // Threaded through `resolveAuth` below so an end-to-end test (or a
+    // mocked GitHub backend) can inject a deterministic login without
+    // hitting api.github.com.
+    this.loginResolver = loginResolver ?? fetchGitHubLogin;
+  }
 
   get state(): WatcherState {
     return {
@@ -195,7 +220,7 @@ export class InboxWatcher {
 
     let auth: AuthContext;
     try {
-      auth = await resolveAuth(this.cfg);
+      auth = await resolveAuth(this.cfg, this.loginResolver);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.log(`[ERR] auth: ${msg}`);
@@ -250,8 +275,9 @@ export class InboxWatcher {
   // ─── internal ────────────────────────────────────────────────────────────
 
   private async runLoop(initialAuth: AuthContext): Promise<void> {
-    let auth = initialAuth;
+    const auth = initialAuth;
     let sessionId = this.currentSessionId;
+    let backoffMs = RECONNECT_BACKOFF_START_MS;
     while (this.running) {
       try {
         if (!sessionId) {
@@ -266,6 +292,10 @@ export class InboxWatcher {
             `subscribed: inbox://@${auth.userId} (sessionId=${sessionId.slice(0, 8)}..., re-established)`
           );
         }
+        // Re-subscribed successfully → reset the back-off so a transient
+        // blip after a long stable run doesn't immediately wait the full
+        // 60s cap on its next failure.
+        backoffMs = RECONNECT_BACKOFF_START_MS;
         await this.streamSse(auth, sessionId);
         // streamSse returning without throw == stop() invoked.
       } catch (err) {
@@ -273,11 +303,12 @@ export class InboxWatcher {
           break;
         }
         const msg = err instanceof Error ? err.message : String(err);
-        this.log(`[reconnect] ${msg} — retry in 3s`);
+        this.log(`[reconnect] ${msg} — retry in ${Math.round(backoffMs / 1000)}s`);
         this.currentMode = 'reconnecting';
         this.currentSessionId = null;
         sessionId = null;
-        await sleep(3_000);
+        await sleep(backoffMs);
+        backoffMs = nextBackoffMs(backoffMs);
       }
     }
     this.currentMode = 'idle';
