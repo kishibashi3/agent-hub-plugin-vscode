@@ -2,7 +2,7 @@
   "name": "agent-hub-bridge-vscode",
   "displayName": "agent-hub bridge (VS Code)",
   "description": "IDE-bound bridge that relays agent-hub DMs into the VS Code Language Model API (Copilot Chat) and posts replies back, with IDE context auto-attached.",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publisher": "kishibashi3",
   "private": true,
   "license": "MIT",
@@ -63,12 +63,6 @@
           "type": "string",
           "default": "",
           "description": "Tenant identifier (X-Tenant-Id). Leave blank for default tenant."
-        },
-        "agentHubBridge.githubPat": {
-          "type": "string",
-          "default": "",
-          "description": "DEPRECATED (scheduled for removal in 0.3.0) — use the `agent-hub bridge: Set GitHub PAT` command instead so the secret lands in VS Code SecretStorage (OS keychain) rather than plaintext on disk. Values set here are read as a legacy fallback when the secret store is empty, and auto-migrated into secret storage on the next `Start inbox watch` invocation (a warning popup will then ask you to clear this setting).",
-          "deprecationMessage": "Plaintext PATs in settings.json are persisted to disk and end up in backups / sync / VCS. Use the `agent-hub bridge: Set GitHub PAT` command to store the secret in VS Code SecretStorage instead. This setting is read as a legacy fallback and auto-migrated on first start. SCHEDULED FOR REMOVAL IN 0.3.0."
         },
         "agentHubBridge.systemPrompt": {
           "type": "string",

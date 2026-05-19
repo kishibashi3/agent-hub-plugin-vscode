@@ -58,7 +58,6 @@ Available under `agentHubBridge.*`:
 | `agentHubBridge.url` | `http://localhost:3000/mcp` | agent-hub MCP endpoint. **Default is a dev-localhost value — override before connecting to any non-local deployment.** Production / Pi5 / remote tenants must set this explicitly; the follow-up SSE-watch PR will additionally `console.warn` (or refuse to start) when this is left at the default in a non-dev environment, per the ecosystem "no silent production fallback" rule (= redline #1). |
 | `agentHubBridge.user` | (empty) | Handle (trust mode) / override (pat mode) |
 | `agentHubBridge.tenant` | (empty = default tenant) | `X-Tenant-Id` |
-| `agentHubBridge.githubPat` | (empty) | **DEPRECATED — use the `agent-hub bridge: Set GitHub PAT` command** so the value lands in VS Code SecretStorage instead of plaintext. Read as a legacy fallback; auto-migrated into secret storage on next start. See the [Secrets](#secrets) section. |
 | `agentHubBridge.systemPrompt` | (empty → built-in default) | Prepended to every DM forwarded to the LM. Empty falls back to a built-in prompt that frames the agent as an agent-hub participant. |
 | `agentHubBridge.languageModel.vendor` | `copilot` | Passed to `vscode.lm.selectChatModels`. |
 | `agentHubBridge.languageModel.family` | (empty) | Optional family filter (e.g. `gpt-4o`). Empty = no family constraint. |
@@ -164,13 +163,13 @@ Commands:
 - `agent-hub bridge: Set GitHub PAT (secret storage)` — prompts via a masked input box, validates the PAT against `https://api.github.com/user`, then stores it. A bad PAT (revoked, expired, wrong scope) is rejected before anything touches the keychain.
 - `agent-hub bridge: Clear GitHub PAT (secret storage)` — modal confirmation, then `secrets.delete`.
 
-Read precedence at startup:
+At startup:
 
-1. **Secret storage** (preferred)
-2. **`agentHubBridge.githubPat` setting** (legacy fallback)
-3. None — trust mode if `agentHubBridge.user` is set, otherwise startup fails with a clear error.
+1. **Secret storage** if populated — the bridge uses it.
+2. Otherwise, **trust mode** if `agentHubBridge.user` is set.
+3. Otherwise, startup fails with a clear error pointing at the `Set GitHub PAT` command.
 
-On the first `Start inbox watch` after upgrading from a version that read the plaintext setting, the bridge auto-copies the setting into secret storage and surfaces a warning popup with an "Open settings.json" action so you can remove the redundant plaintext copy. When both sources are populated, the secret value wins and a one-time `[WARN]` line is logged about the shadowed setting.
+> **Removed in 0.4.0**: the plaintext `agentHubBridge.githubPat` setting and its auto-migration helper. Users upgrading with a stale plaintext entry in `settings.json` will see VS Code's "unrecognized setting" warning + a friendly error message; running `agent-hub bridge: Set GitHub PAT` once moves the value into secret storage cleanly. There is no automatic copy from the old setting.
 
 ## Authentication modes
 

@@ -13,7 +13,7 @@ import {
 } from './agentHub';
 import { DEFAULT_IDE_CONTEXT_OPTIONS, type IdeContextOptions } from './ideContext';
 import { LmDispatcher, LmDispatcherConfig } from './lmDispatcher';
-import { fetchGitHubLogin, resolvePatPrecedence } from './protocol';
+import { fetchGitHubLogin } from './protocol';
 
 const SECRET_KEY_GITHUB_PAT = 'agentHubBridge.githubPat';
 
@@ -32,13 +32,6 @@ let outputChannel: vscode.OutputChannel | undefined;
 let watcher: InboxWatcher | undefined;
 let watcherDisposable: vscode.Disposable | undefined;
 let dispatcher: LmDispatcher | undefined;
-/**
- * Per-session flag for the "your plaintext setting is being shadowed by the
- * stored secret" warning. We log it the first time we observe both sources
- * carrying a PAT, then stay silent for the rest of the activation so a busy
- * status command doesn't spam the output channel.
- */
-let shadowWarnedThisSession = false;
 
 function log(msg: string): void {
   const ts = new Date().toISOString();
@@ -51,24 +44,16 @@ async function readConfig(context: vscode.ExtensionContext): Promise<BridgeConfi
   // in package.json), never undefined. Use `||` everywhere so empty-string
   // falls through to the placeholder — `??` would only catch undefined and
   // leave the empty string in place (cosmetic bug, but easy to get wrong).
-  const secretPat = await context.secrets.get(SECRET_KEY_GITHUB_PAT);
-  const settingPat = cfg.get<string>('githubPat');
-  const pat = resolvePatPrecedence(secretPat, settingPat);
-
-  if (pat.shadowed && !shadowWarnedThisSession) {
-    shadowWarnedThisSession = true;
-    log(
-      '[WARN] agentHubBridge.githubPat is present in BOTH settings.json AND secret storage. ' +
-        'The secret-storage value wins; please clear the setting via "agent-hub bridge: Clear GitHub PAT" ' +
-        'or edit settings.json directly to take the plaintext copy off disk.'
-    );
-  }
+  //
+  // The GitHub PAT lives in `SecretStorage` only — the legacy
+  // `agentHubBridge.githubPat` setting was removed in 0.4.0 (issue #15).
+  const secretPat = ((await context.secrets.get(SECRET_KEY_GITHUB_PAT)) ?? '').trim();
 
   return {
     url: cfg.get<string>('url') || LOCALHOST_DEFAULT_URL,
     user: cfg.get<string>('user') || '',
     tenant: cfg.get<string>('tenant') || '',
-    githubPat: pat.value,
+    githubPat: secretPat,
   };
 }
 
@@ -167,11 +152,6 @@ async function startWatcher(context: vscode.ExtensionContext): Promise<void> {
     return;
   }
 
-  // Auto-migrate `agentHubBridge.githubPat` from settings.json into secret
-  // storage on first start after upgrade (per issue #9). Runs before
-  // readConfig so the migrated value participates in this start cycle.
-  await maybeMigratePatToSecretStorage(context);
-
   const config = await readConfig(context);
 
   // Redline #1 visibility (per PR #3 reviewer Minor 1): the watcher already
@@ -263,76 +243,16 @@ async function showStatus(context: vscode.ExtensionContext): Promise<void> {
   const tenant = cfg.tenant || '(default)';
   const sid = state.sessionId ? `${state.sessionId.slice(0, 8)}...` : 'none';
   const auth = state.authMode ?? '(not started)';
-  // Surface PAT-source info so an operator can tell at a glance whether
-  // the secret store is in use vs the legacy setting.
-  const cfgRaw = vscode.workspace.getConfiguration('agentHubBridge');
-  const secretPat = await context.secrets.get(SECRET_KEY_GITHUB_PAT);
-  const settingPat = cfgRaw.get<string>('githubPat');
-  const patSource = resolvePatPrecedence(secretPat, settingPat).source;
+  // Surface whether the secret store is populated. Post-0.4.0 the only
+  // place a PAT can live is `SecretStorage` — the legacy plaintext
+  // setting was removed.
+  const secretPat = (await context.secrets.get(SECRET_KEY_GITHUB_PAT)) ?? '';
+  const patSource = secretPat.trim().length > 0 ? 'secret' : 'none';
   const summary =
     `agent-hub bridge — url=${url} user=${user || '(unset)'} tenant=${tenant} ` +
     `auth=${auth} watcher=${state.mode} sessionId=${sid} pat=${patSource}`;
   log(summary);
   void vscode.window.showInformationMessage(summary);
-}
-
-/**
- * Auto-migration triggered on `startWatcher`. If the legacy
- * `agentHubBridge.githubPat` setting carries a PAT and secret storage
- * does NOT, copy the value into secret storage and surface a one-time
- * popup pointing the user at settings.json so they can remove the
- * plaintext copy.
- *
- * No-ops when:
- *   - The setting is empty / whitespace
- *   - Secret storage already has a value (migration is already done; the
- *     `[WARN]` for shadowing fires from `readConfig` instead)
- */
-async function maybeMigratePatToSecretStorage(
-  context: vscode.ExtensionContext
-): Promise<void> {
-  const cfg = vscode.workspace.getConfiguration('agentHubBridge');
-  const settingPat = (cfg.get<string>('githubPat') ?? '').trim();
-  if (!settingPat) return;
-
-  const secretPat = ((await context.secrets.get(SECRET_KEY_GITHUB_PAT)) ?? '').trim();
-  if (secretPat) {
-    // Both are set — shadow case, `readConfig` already logs the WARN.
-    return;
-  }
-
-  // PR #10 Suggestion 1 fold-in: `secrets.store` is a security-sensitive
-  // operation that can plausibly fail (locked keychain, permission denied,
-  // OS keychain daemon missing). Swallow + surface so the user sees a
-  // clear error instead of a silent no-op.
-  try {
-    await context.secrets.store(SECRET_KEY_GITHUB_PAT, settingPat);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    log(`[ERR] migration: secrets.store failed — ${msg}`);
-    void vscode.window.showErrorMessage(
-      `agent-hub bridge: could not migrate agentHubBridge.githubPat into secret storage (${msg}). ` +
-        'The plaintext setting will continue to be used as a fallback.'
-    );
-    return;
-  }
-  log(
-    '[migration] copied agentHubBridge.githubPat from settings.json into VS Code secret storage'
-  );
-
-  void vscode.window
-    .showWarningMessage(
-      'agent-hub bridge: copied your `agentHubBridge.githubPat` from settings.json into ' +
-        'VS Code secret storage. The plaintext setting is now redundant — remove it from ' +
-        'settings.json to take the secret off disk.',
-      'Open settings.json',
-      'Later'
-    )
-    .then((choice) => {
-      if (choice === 'Open settings.json') {
-        void vscode.commands.executeCommand('workbench.action.openSettingsJson');
-      }
-    });
 }
 
 async function setGithubPatCommand(context: vscode.ExtensionContext): Promise<void> {
@@ -382,9 +302,6 @@ async function setGithubPatCommand(context: vscode.ExtensionContext): Promise<vo
     return;
   }
   log(`[secret] stored agentHubBridge.githubPat (validated for GitHub user @${login})`);
-  // Reset the per-session shadow warning so a freshly-stored secret
-  // re-triggers the warning if the legacy setting is still present.
-  shadowWarnedThisSession = false;
   void vscode.window.showInformationMessage(
     `agent-hub bridge: PAT stored for GitHub user @${login}.`
   );
@@ -420,8 +337,6 @@ async function clearGithubPatCommand(context: vscode.ExtensionContext): Promise<
     return;
   }
   log('[secret] cleared agentHubBridge.githubPat from secret storage');
-  // Allow the shadow warning to fire again on the next readConfig.
-  shadowWarnedThisSession = false;
   void vscode.window.showInformationMessage('agent-hub bridge: GitHub PAT cleared.');
 }
 
