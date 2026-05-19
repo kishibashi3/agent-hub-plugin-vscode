@@ -1,0 +1,78 @@
+{
+  "name": "agent-hub-bridge-vscode",
+  "displayName": "agent-hub bridge (VS Code)",
+  "description": "IDE-bound bridge that relays agent-hub DMs into the VS Code Language Model API (Copilot Chat) and posts replies back, with IDE context auto-attached.",
+  "version": "0.0.1",
+  "publisher": "kishibashi3",
+  "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kishibashi3/agent-hub-bridge-vscode.git"
+  },
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./out/extension.js",
+  "enabledApiProposals": [
+    "languageModels"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "agentHubBridge.start",
+        "title": "agent-hub bridge: Start inbox watch"
+      },
+      {
+        "command": "agentHubBridge.stop",
+        "title": "agent-hub bridge: Stop inbox watch"
+      },
+      {
+        "command": "agentHubBridge.status",
+        "title": "agent-hub bridge: Show connection status"
+      }
+    ],
+    "configuration": {
+      "title": "agent-hub bridge",
+      "properties": {
+        "agentHubBridge.url": {
+          "type": "string",
+          "default": "http://localhost:3000/mcp",
+          "description": "agent-hub MCP endpoint URL."
+        },
+        "agentHubBridge.user": {
+          "type": "string",
+          "default": "",
+          "description": "Handle to register as (trust mode), or to override in pat mode. Required in trust mode."
+        },
+        "agentHubBridge.tenant": {
+          "type": "string",
+          "default": "",
+          "description": "Tenant identifier (X-Tenant-Id). Leave blank for default tenant."
+        },
+        "agentHubBridge.githubPat": {
+          "type": "string",
+          "default": "",
+          "description": "Optional GitHub PAT (read:user) for pat-mode authentication. Prefer storing via VS Code secrets in a follow-up."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "typecheck": "tsc --noEmit -p ./",
+    "vscode:prepublish": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "@types/vscode": "^1.95.0",
+    "typescript": "^5.7.2"
+  }
+}
