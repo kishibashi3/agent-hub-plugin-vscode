@@ -2,7 +2,7 @@
   "name": "agent-hub-bridge-vscode",
   "displayName": "agent-hub bridge (VS Code)",
   "description": "IDE-bound bridge that relays agent-hub DMs into the VS Code Language Model API (Copilot Chat) and posts replies back, with IDE context auto-attached.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "kishibashi3",
   "private": true,
   "license": "MIT",
@@ -129,6 +129,17 @@
           "type": "boolean",
           "default": false,
           "description": "Whether `?? new-file.txt` working-tree entries appear. OFF by default — new files are often sensitive (drafts, secrets, scaffolds)."
+        },
+        "agentHubBridge.ideContext.multiEditor.maxSecondaryEditors": {
+          "type": "number",
+          "default": 3,
+          "minimum": 0,
+          "description": "Cap on the number of *secondary* (non-active visible) text editors surfaced as header-only entries (URI + language + cursor only — no selection, window, or diagnostics). Set to 0 to suppress the section and skip enumeration entirely."
+        },
+        "agentHubBridge.ideContext.notebook.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether to snapshot the active notebook editor's header (URI, type, cell position, active-cell language). Per-cell content is never included regardless — see issue #13 for out-of-scope rationale."
         }
       }
     }

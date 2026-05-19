@@ -5,13 +5,17 @@ import assert from 'node:assert/strict';
 
 import {
   EMPTY_IDE_CONTEXT_SNAPSHOT,
+  formatActiveNotebookBlock,
   formatGitDiffBlock,
   formatIdeContext,
   formatPrompt,
+  formatSecondaryEditorsBlock,
   truncateDiff,
+  type IdeActiveNotebook,
   type IdeContextSnapshot,
   type IdeGitChange,
   type IdeGitDiff,
+  type IdeSecondaryEditor,
 } from '../src/promptFormat';
 import type { InboxMessage } from '../src/protocol';
 
@@ -321,6 +325,135 @@ describe('formatIdeContext gitDiff integration', () => {
       diagnostics: [],
     };
     assert.doesNotMatch(formatIdeContext(snapshot), /### Git diff/);
+  });
+});
+
+describe('formatSecondaryEditorsBlock', () => {
+  const a: IdeSecondaryEditor = {
+    uri: 'file:///workspace/a.ts',
+    languageId: 'typescript',
+    cursorLine: 12,
+    cursorColumn: 4,
+  };
+  const b: IdeSecondaryEditor = {
+    uri: 'file:///workspace/b.md',
+    languageId: 'markdown',
+    cursorLine: 87,
+    cursorColumn: 1,
+  };
+
+  it('returns the empty string for an empty list', () => {
+    assert.equal(formatSecondaryEditorsBlock([]), '');
+  });
+
+  it('renders a single secondary editor with URI, language, and cursor', () => {
+    const out = formatSecondaryEditorsBlock([a]);
+    assert.match(out, /^### Other visible editors \(1\)\n/);
+    assert.match(out, /- `file:\/\/\/workspace\/a\.ts` \(typescript\) — line 12, col 4/);
+  });
+
+  it('renders multiple secondary editors in input order', () => {
+    const out = formatSecondaryEditorsBlock([a, b]);
+    assert.match(out, /### Other visible editors \(2\)/);
+    const aIdx = out.indexOf('a.ts');
+    const bIdx = out.indexOf('b.md');
+    assert.ok(aIdx >= 0);
+    assert.ok(bIdx > aIdx);
+  });
+});
+
+describe('formatActiveNotebookBlock', () => {
+  const sampleNotebook: IdeActiveNotebook = {
+    uri: 'file:///workspace/example.ipynb',
+    notebookType: 'jupyter-notebook',
+    activeCellIndex: 2,
+    cellCount: 12,
+    activeCellLanguageId: 'python',
+  };
+
+  it('returns the empty string for undefined input', () => {
+    assert.equal(formatActiveNotebookBlock(undefined), '');
+  });
+
+  it('renders the full header for a mid-notebook position', () => {
+    const out = formatActiveNotebookBlock(sampleNotebook);
+    assert.match(out, /^### Active notebook/);
+    assert.match(out, /URI: `file:\/\/\/workspace\/example\.ipynb`/);
+    assert.match(out, /Type: jupyter-notebook/);
+    // 0-indexed activeCellIndex=2 → displayed as cell 3 of 12
+    assert.match(out, /Active cell: 3 of 12 \(python\)/);
+  });
+
+  it('reports "no active cell" when activeCellIndex is -1 with a non-empty notebook', () => {
+    const nb = { ...sampleNotebook, activeCellIndex: -1, activeCellLanguageId: '' };
+    const out = formatActiveNotebookBlock(nb);
+    assert.match(out, /12 cell\(s\); no active cell\./);
+    assert.doesNotMatch(out, /Active cell:/);
+  });
+
+  it('reports an empty notebook when cellCount is 0', () => {
+    const nb = {
+      ...sampleNotebook,
+      activeCellIndex: -1,
+      cellCount: 0,
+      activeCellLanguageId: '',
+    };
+    assert.match(formatActiveNotebookBlock(nb), /\(empty notebook — 0 cells\)/);
+  });
+});
+
+describe('formatIdeContext multi-editor + notebook integration', () => {
+  it('renders secondaries before notebook when both are present', () => {
+    const snapshot: IdeContextSnapshot = {
+      activeFile: sampleActiveFile,
+      diagnostics: [],
+      secondaryEditors: [
+        {
+          uri: 'file:///workspace/other.ts',
+          languageId: 'typescript',
+          cursorLine: 1,
+          cursorColumn: 1,
+        },
+      ],
+      activeNotebook: {
+        uri: 'file:///workspace/x.ipynb',
+        notebookType: 'jupyter-notebook',
+        activeCellIndex: 0,
+        cellCount: 5,
+        activeCellLanguageId: 'python',
+      },
+    };
+    const out = formatIdeContext(snapshot);
+    const secIdx = out.indexOf('### Other visible editors');
+    const nbIdx = out.indexOf('### Active notebook');
+    assert.ok(secIdx >= 0);
+    assert.ok(nbIdx > secIdx);
+  });
+
+  it('omits both sections when neither field is present', () => {
+    const snapshot: IdeContextSnapshot = {
+      activeFile: sampleActiveFile,
+      diagnostics: [],
+    };
+    const out = formatIdeContext(snapshot);
+    assert.doesNotMatch(out, /### Other visible editors/);
+    assert.doesNotMatch(out, /### Active notebook/);
+  });
+
+  it('renders notebook alone when the snapshot has no activeFile (notebook-only session)', () => {
+    const snapshot: IdeContextSnapshot = {
+      diagnostics: [],
+      activeNotebook: {
+        uri: 'file:///workspace/x.ipynb',
+        notebookType: 'jupyter-notebook',
+        activeCellIndex: 1,
+        cellCount: 3,
+        activeCellLanguageId: 'python',
+      },
+    };
+    const out = formatIdeContext(snapshot);
+    assert.match(out, /### Active notebook/);
+    assert.doesNotMatch(out, /## IDE context/);
   });
 });
 

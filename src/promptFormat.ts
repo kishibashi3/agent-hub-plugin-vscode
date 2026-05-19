@@ -13,6 +13,26 @@
 
 import type { InboxMessage } from './protocol';
 
+export interface IdeMultiEditorOptions {
+  /**
+   * Cap on the number of *secondary* (non-active visible) text editors
+   * surfaced as header-only entries. `0` suppresses the section entirely
+   * AND short-circuits enumeration in the collector. Default `3` —
+   * enough for a typical two- or three-split layout without blowing
+   * the prompt budget.
+   */
+  readonly maxSecondaryEditors: number;
+}
+
+export interface IdeNotebookOptions {
+  /**
+   * Whether to snapshot `vscode.window.activeNotebookEditor` at all.
+   * Default `true` (symmetric with `ideContext.enabled`); per-cell
+   * content is never included regardless — see issue #13 out-of-scope.
+   */
+  readonly enabled: boolean;
+}
+
 export interface IdeGitDiffOptions {
   /**
    * Opt-in. Diffs can carry sensitive working-tree state, so we require
@@ -34,6 +54,8 @@ export interface IdeContextOptions {
   readonly maxDiagnostics: number;
   readonly windowLinesAroundCursor: number;
   readonly gitDiff: IdeGitDiffOptions;
+  readonly multiEditor: IdeMultiEditorOptions;
+  readonly notebook: IdeNotebookOptions;
 }
 
 // Frozen for `EMPTY_IDE_CONTEXT_SNAPSHOT` parity (PR #5 Suggestion 2) — a
@@ -51,6 +73,12 @@ export const DEFAULT_IDE_CONTEXT_OPTIONS: IdeContextOptions = Object.freeze({
     maxCharsPerFile: 1500,
     includeUntracked: false,
   }) as IdeGitDiffOptions,
+  multiEditor: Object.freeze({
+    maxSecondaryEditors: 3,
+  }) as IdeMultiEditorOptions,
+  notebook: Object.freeze({
+    enabled: true,
+  }) as IdeNotebookOptions,
 });
 
 export type DiagnosticSeverityLabel = 'error' | 'warning' | 'info' | 'hint';
@@ -113,12 +141,35 @@ export interface IdeGitDiff {
   readonly truncatedFileCount: number;
 }
 
+export interface IdeSecondaryEditor {
+  /** Stringified URI of a *non-active* visible text editor. */
+  readonly uri: string;
+  readonly languageId: string;
+  /** 1-indexed cursor position. */
+  readonly cursorLine: number;
+  readonly cursorColumn: number;
+}
+
+export interface IdeActiveNotebook {
+  /** Stringified URI of the active notebook. */
+  readonly uri: string;
+  /** e.g. `"jupyter-notebook"` (`NotebookDocument.notebookType`). */
+  readonly notebookType: string;
+  /** 0-indexed; `-1` when there is no resolved active cell. */
+  readonly activeCellIndex: number;
+  readonly cellCount: number;
+  /** Empty string when there is no active cell. */
+  readonly activeCellLanguageId: string;
+}
+
 export interface IdeContextSnapshot {
   readonly activeFile?: IdeActiveFile;
   readonly selection?: IdeSelection;
   readonly cursorWindow?: IdeCursorWindow;
   readonly diagnostics: readonly IdeDiagnostic[];
   readonly gitDiff?: IdeGitDiff;
+  readonly secondaryEditors?: readonly IdeSecondaryEditor[];
+  readonly activeNotebook?: IdeActiveNotebook;
 }
 
 /** Sentinel snapshot returned when context is disabled or no editor is focused. */
@@ -201,6 +252,62 @@ export function formatGitDiffBlock(diff: IdeGitDiff, maxCharsPerFile: number): s
 }
 
 /**
+ * Render a list of secondary (non-active) visible text editors as a
+ * compact markdown block. Header-only by design — no selection / window
+ * / diagnostics surface here, so the per-secondary cost stays bounded.
+ *
+ * Returns the empty string for empty input so the caller can drop the
+ * surrounding separator without an extra check.
+ *
+ * Pure function — exported for unit-testing.
+ */
+export function formatSecondaryEditorsBlock(
+  editors: readonly IdeSecondaryEditor[]
+): string {
+  if (editors.length === 0) return '';
+  const lines: string[] = [`### Other visible editors (${editors.length})`];
+  for (const e of editors) {
+    lines.push(`- \`${e.uri}\` (${e.languageId}) — line ${e.cursorLine}, col ${e.cursorColumn}`);
+  }
+  return lines.join('\n');
+}
+
+/**
+ * Render the active notebook header — URI, type, cell position, active
+ * cell's language. Per-cell content is intentionally NOT included
+ * (see issue #13 out-of-scope discussion).
+ *
+ * Returns the empty string when `notebook` is `undefined` so the caller
+ * can drop the surrounding separator without an extra check.
+ *
+ * Pure function — exported for unit-testing.
+ */
+export function formatActiveNotebookBlock(notebook: IdeActiveNotebook | undefined): string {
+  if (!notebook) return '';
+  const lines: string[] = ['### Active notebook'];
+  lines.push('');
+  lines.push(`URI: \`${notebook.uri}\``);
+  lines.push(`Type: ${notebook.notebookType}`);
+  if (notebook.cellCount === 0) {
+    lines.push('(empty notebook — 0 cells)');
+  } else if (notebook.activeCellIndex < 0) {
+    lines.push(`${notebook.cellCount} cell(s); no active cell.`);
+  } else {
+    // Display cells as 1-indexed for human-friendliness in the prompt
+    // (matches how Jupyter UIs talk about "cell 3 of 12").
+    const displayIndex = notebook.activeCellIndex + 1;
+    const lang =
+      notebook.activeCellLanguageId.length > 0
+        ? ` (${notebook.activeCellLanguageId})`
+        : '';
+    lines.push(
+      `Active cell: ${displayIndex} of ${notebook.cellCount}${lang}.`
+    );
+  }
+  return lines.join('\n').trimEnd();
+}
+
+/**
  * Render an `IdeContextSnapshot` as a markdown block embedded in the LM
  * prompt. Returns the empty string when the snapshot carries nothing
  * (so callers can drop the surrounding separator without an extra check).
@@ -258,6 +365,22 @@ export function formatIdeContext(snapshot: IdeContextSnapshot): string {
     const gitBlock = formatGitDiffBlock(snapshot.gitDiff, Number.MAX_SAFE_INTEGER);
     if (gitBlock.length > 0) {
       parts.push(gitBlock);
+      parts.push('');
+    }
+  }
+
+  if (snapshot.secondaryEditors && snapshot.secondaryEditors.length > 0) {
+    const block = formatSecondaryEditorsBlock(snapshot.secondaryEditors);
+    if (block.length > 0) {
+      parts.push(block);
+      parts.push('');
+    }
+  }
+
+  if (snapshot.activeNotebook) {
+    const block = formatActiveNotebookBlock(snapshot.activeNotebook);
+    if (block.length > 0) {
+      parts.push(block);
       parts.push('');
     }
   }

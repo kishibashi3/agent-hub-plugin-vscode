@@ -30,6 +30,7 @@ import * as vscode from 'vscode';
 import {
   EMPTY_IDE_CONTEXT_SNAPSHOT,
   type IdeActiveFile,
+  type IdeActiveNotebook,
   type IdeContextOptions,
   type IdeContextSnapshot,
   type IdeCursorWindow,
@@ -38,6 +39,9 @@ import {
   type IdeGitChangeStatus,
   type IdeGitDiff,
   type IdeGitDiffOptions,
+  type IdeMultiEditorOptions,
+  type IdeNotebookOptions,
+  type IdeSecondaryEditor,
   type IdeSelection,
   type DiagnosticSeverityLabel,
   truncateDiff,
@@ -49,9 +53,12 @@ export {
   DEFAULT_IDE_CONTEXT_OPTIONS,
   type DiagnosticSeverityLabel,
   EMPTY_IDE_CONTEXT_SNAPSHOT,
+  formatActiveNotebookBlock,
   formatGitDiffBlock,
   formatIdeContext,
+  formatSecondaryEditorsBlock,
   type IdeActiveFile,
+  type IdeActiveNotebook,
   type IdeContextOptions,
   type IdeContextSnapshot,
   type IdeCursorWindow,
@@ -60,6 +67,9 @@ export {
   type IdeGitChangeStatus,
   type IdeGitDiff,
   type IdeGitDiffOptions,
+  type IdeMultiEditorOptions,
+  type IdeNotebookOptions,
+  type IdeSecondaryEditor,
   type IdeSelection,
   truncateDiff,
 } from './promptFormat';
@@ -90,19 +100,30 @@ const GIT_STATUS_BOTH_MODIFIED = 18;
 /**
  * Snapshot the current VS Code editor state. Synchronous read of
  * `vscode.window.activeTextEditor` + `vscode.languages.getDiagnostics`,
- * so the result is captured exactly at call time (no async surprises).
+ * plus an async pass for `vscode.git` working-tree diffs (gated by
+ * `opts.gitDiff.enabled`).
  *
  * Returns `EMPTY_IDE_CONTEXT_SNAPSHOT` when:
  *   - `opts.enabled === false`
- *   - There is no active text editor (e.g. user has focus on the output
- *     channel, settings view, or a non-text widget)
+ *   - AND no notebook editor is focused either (issue #13: when the
+ *     user is in a notebook-only view, we still want to surface the
+ *     notebook header even though there's no text editor)
  */
 export async function collectIdeContext(opts: IdeContextOptions): Promise<IdeContextSnapshot> {
   if (!opts.enabled) {
     return EMPTY_IDE_CONTEXT_SNAPSHOT;
   }
+
+  // Notebook collection runs independently of text-editor focus — a user
+  // editing a `.ipynb` without any side-by-side text editor would
+  // otherwise see no IDE context at all.
+  const activeNotebook = collectActiveNotebook(opts.notebook);
+
   const editor = vscode.window.activeTextEditor;
   if (!editor) {
+    if (activeNotebook) {
+      return { diagnostics: [], activeNotebook };
+    }
     return EMPTY_IDE_CONTEXT_SNAPSHOT;
   }
 
@@ -171,14 +192,86 @@ export async function collectIdeContext(opts: IdeContextOptions): Promise<IdeCon
     ? await collectGitDiff(doc.uri, opts.gitDiff)
     : undefined;
 
+  const secondaryEditors = collectSecondaryEditors(editor, opts.multiEditor);
+  // `activeNotebook` was already collected above (before the early-return
+  // path that handles notebook-only sessions); re-use it here.
+
   const snapshot: IdeContextSnapshot = {
     activeFile,
     ...(sel ? { selection: sel } : {}),
     ...(window ? { cursorWindow: window } : {}),
     diagnostics,
     ...(gitDiff ? { gitDiff } : {}),
+    ...(secondaryEditors.length > 0 ? { secondaryEditors } : {}),
+    ...(activeNotebook ? { activeNotebook } : {}),
   };
   return snapshot;
+}
+
+/**
+ * Snapshot the *non-active* visible text editors as header-only entries
+ * (URI + language + cursor only — no selection / window / diagnostics).
+ *
+ * Skips:
+ *   - The active editor itself (already covered by `activeFile`)
+ *   - Duplicate URIs (when the same document is shown in two panes)
+ *   - Anything beyond `opts.maxSecondaryEditors` (cap of `0` short-
+ *     circuits enumeration entirely)
+ */
+function collectSecondaryEditors(
+  active: vscode.TextEditor,
+  opts: IdeMultiEditorOptions
+): IdeSecondaryEditor[] {
+  if (opts.maxSecondaryEditors <= 0) return [];
+  const activeUri = active.document.uri.toString();
+  const seen = new Set<string>([activeUri]);
+  const result: IdeSecondaryEditor[] = [];
+  for (const e of vscode.window.visibleTextEditors) {
+    if (result.length >= opts.maxSecondaryEditors) break;
+    const uri = e.document.uri.toString();
+    if (seen.has(uri)) continue;
+    seen.add(uri);
+    const cursor = e.selection.active;
+    result.push({
+      uri,
+      languageId: e.document.languageId,
+      cursorLine: cursor.line + 1,
+      cursorColumn: cursor.character + 1,
+    });
+  }
+  return result;
+}
+
+/**
+ * Snapshot the active notebook header — type, cell counts, active-cell
+ * language. **Per-cell content is NOT included** per issue #13 (out of
+ * scope; token budget + multimodality + output handling are each
+ * separate concerns).
+ *
+ * Returns `undefined` when:
+ *   - `opts.enabled === false`
+ *   - No notebook editor is focused
+ */
+function collectActiveNotebook(opts: IdeNotebookOptions): IdeActiveNotebook | undefined {
+  if (!opts.enabled) return undefined;
+  const ne = vscode.window.activeNotebookEditor;
+  if (!ne) return undefined;
+  const nb = ne.notebook;
+  const cellCount = nb.cellCount;
+  const activeCellIndex = ne.selection?.start ?? -1;
+  const safeActiveIndex =
+    cellCount === 0 || activeCellIndex < 0 || activeCellIndex >= cellCount
+      ? -1
+      : activeCellIndex;
+  const activeCellLanguageId =
+    safeActiveIndex >= 0 ? nb.cellAt(safeActiveIndex).document.languageId : '';
+  return {
+    uri: nb.uri.toString(),
+    notebookType: nb.notebookType,
+    activeCellIndex: safeActiveIndex,
+    cellCount,
+    activeCellLanguageId,
+  };
 }
 
 /**

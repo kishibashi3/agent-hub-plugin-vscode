@@ -108,6 +108,8 @@ function readIdeContextOptions(
   const gitMaxFiles = cfg.get<number>('ideContext.gitDiff.maxFiles');
   const gitMaxCharsPerFile = cfg.get<number>('ideContext.gitDiff.maxCharsPerFile');
   const gitIncludeUntracked = cfg.get<boolean>('ideContext.gitDiff.includeUntracked');
+  const maxSecondaryEditors = cfg.get<number>('ideContext.multiEditor.maxSecondaryEditors');
+  const notebookEnabled = cfg.get<boolean>('ideContext.notebook.enabled');
   return {
     enabled: typeof enabled === 'boolean' ? enabled : DEFAULT_IDE_CONTEXT_OPTIONS.enabled,
     maxSelectionChars: nonNegativeInt(
@@ -136,6 +138,18 @@ function readIdeContextOptions(
         typeof gitIncludeUntracked === 'boolean'
           ? gitIncludeUntracked
           : DEFAULT_IDE_CONTEXT_OPTIONS.gitDiff.includeUntracked,
+    },
+    multiEditor: {
+      maxSecondaryEditors: nonNegativeInt(
+        maxSecondaryEditors,
+        DEFAULT_IDE_CONTEXT_OPTIONS.multiEditor.maxSecondaryEditors
+      ),
+    },
+    notebook: {
+      enabled:
+        typeof notebookEnabled === 'boolean'
+          ? notebookEnabled
+          : DEFAULT_IDE_CONTEXT_OPTIONS.notebook.enabled,
     },
   };
 }

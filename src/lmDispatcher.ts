@@ -199,10 +199,20 @@ export class LmDispatcher {
             ? `@${ideSnapshot.gitDiff.branchName}`
             : '')
         : '';
+      const secondaries =
+        ideSnapshot.secondaryEditors && ideSnapshot.secondaryEditors.length > 0
+          ? ` secondaries=${ideSnapshot.secondaryEditors.length}`
+          : '';
+      const notebook = ideSnapshot.activeNotebook
+        ? ` notebook=${ideSnapshot.activeNotebook.notebookType}:` +
+          `${ideSnapshot.activeNotebook.activeCellIndex >= 0
+            ? ideSnapshot.activeNotebook.activeCellIndex + 1
+            : '-'}/${ideSnapshot.activeNotebook.cellCount}`
+        : '';
       this.deps.log(
         `[ide-context] file=${ideSnapshot.activeFile.uri} ` +
           `lang=${ideSnapshot.activeFile.languageId} ${sel} ` +
-          `diagnostics=${ideSnapshot.diagnostics.length}${git}`
+          `diagnostics=${ideSnapshot.diagnostics.length}${git}${secondaries}${notebook}`
       );
     } else if (this.deps.cfg.ideContext.enabled) {
       // Enabled but no editor focused — note it once per dispatch so the

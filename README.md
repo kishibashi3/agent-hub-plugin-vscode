@@ -4,7 +4,7 @@
 
 IDE-bound bridge for [agent-hub](https://github.com/kishibashi3/agent-hub). Runs as a VS Code extension and relays DMs into the VS Code Language Model API (Copilot Chat), with IDE context (active editor, selection, diagnostics) auto-attached.
 
-> **Status:** complete (issue [#1](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/1) — scaffold + SSE inbox watch + LM bridging + IDE-context auto-attach + `send_message` reply relay). Follow-ups shipped: CI ([#7](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/7)), SecretStorage migration ([#9](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/9)), git-diff attach ([#11](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/11)). Remaining: multi-editor / notebook support, `.vsix` packaging / release tagging.
+> **Status:** complete (issue [#1](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/1) — scaffold + SSE inbox watch + LM bridging + IDE-context auto-attach + `send_message` reply relay). Follow-ups shipped: CI ([#7](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/7)), SecretStorage migration ([#9](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/9)), git-diff attach ([#11](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/11)), multi-pane + notebook awareness ([#13](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/13)). Remaining: `.vsix` packaging / release tagging, ESLint.
 
 ## Architecture
 
@@ -70,6 +70,8 @@ Available under `agentHubBridge.*`:
 | `agentHubBridge.ideContext.gitDiff.maxFiles` | `5` | Cap on files in the git-diff block. `0` suppresses file diffs (header still shown). |
 | `agentHubBridge.ideContext.gitDiff.maxCharsPerFile` | `1500` | Per-file diff truncation cap. `0` suppresses diff bodies entirely (paths + statuses only). |
 | `agentHubBridge.ideContext.gitDiff.includeUntracked` | `false` | Whether `?? new-file.txt` entries appear. Off by default — new files are often sensitive. |
+| `agentHubBridge.ideContext.multiEditor.maxSecondaryEditors` | `3` | Cap on non-active *visible* text editors surfaced as header-only entries (URI + language + cursor only, no selection / window / diagnostics). `0` suppresses the section. |
+| `agentHubBridge.ideContext.notebook.enabled` | `true` | Whether the active notebook's header (URI / type / cell position / language) is included. Per-cell content is never forwarded. |
 
 ## Commands
 
@@ -124,6 +126,34 @@ When `agentHubBridge.ideContext.gitDiff.enabled = true`, the snapshot also inclu
 Defaults (`maxFiles=5`, `maxCharsPerFile=1500`, `includeUntracked=false`) keep the prompt within a token-budget range that pairs well with most chat models. All four `gitDiff.*` knobs follow the same "0 = off, N = cap" semantics as the other IDE-context caps.
 
 The integration uses the bundled `vscode.git` extension's exported API (`vscode.extensions.getExtension('vscode.git')`); no shell-out. If `vscode.git` is disabled the diff is silently omitted.
+
+### Multi-pane editors
+
+When the user has a split layout (e.g. two side-by-side text editors), the secondary editors appear as a compact header-only block beneath the active-file / selection / diagnostics / gitDiff sections:
+
+```
+### Other visible editors (2)
+- `file:///…/foo.ts` (typescript) — line 12, col 4
+- `file:///…/bar.md` (markdown) — line 87, col 1
+```
+
+No selection text, no surrounding window, no per-file diagnostics — the cap (`maxSecondaryEditors`, default 3) plus the header-only shape keep the prompt budget bounded. The active editor still gets the full treatment via `activeFile` / `selection` / `cursorWindow` / `diagnostics`.
+
+### Notebook awareness
+
+When `vscode.window.activeNotebookEditor` is present, the snapshot includes a notebook header:
+
+```
+### Active notebook
+
+URI: `file:///…/example.ipynb`
+Type: jupyter-notebook
+Active cell: 3 of 12 (python).
+```
+
+**Per-cell content is never included** — only the URI, notebook type, cell counts, and the active cell's language. Forwarding cell text would add per-cell handling for outputs, markdown vs code mode, multimodal content, and would routinely blow the prompt budget on data-heavy notebooks; that scope is intentionally deferred to a follow-up if/when a use-case emerges.
+
+A notebook-only session (no text editor focused) still surfaces this block. Set `agentHubBridge.ideContext.notebook.enabled = false` to suppress collection entirely.
 
 ## Secrets
 
