@@ -147,6 +147,189 @@ export function nextBackoffMs(currentMs: number): number {
 }
 
 /**
+ * Shape of an unread inbox message as returned by the agent-hub server's
+ * `get_messages` tool. Mirrors the server-side `handleGetMessages` response
+ * (`agent-hub/src/mcp/tools/get_messages.ts`).
+ */
+export interface InboxMessage {
+  readonly id: string;
+  readonly from: string;
+  readonly to: string;
+  readonly message: string;
+  readonly timestamp: string;
+}
+
+/**
+ * Thin MCP-tools client bound to a live session. Used by `LmDispatcher` to
+ * fetch message bodies (`get_messages`) and ack them (`mark_as_read`) after
+ * a successful LM dispatch.
+ *
+ * Instances are cheap and stateless apart from `nextId` — `InboxWatcher`
+ * constructs a fresh one per call via `watcher.client`, so a session
+ * invalidation (e.g. server restart) is naturally observed: the next
+ * tool call comes back with an error and the dispatcher leaves the
+ * message unread for the watcher to re-pick up after reconnect.
+ */
+export class AgentHubClient {
+  private nextId = 100; // initialize/subscribe use ids 0/1 — stay clear of those.
+
+  constructor(
+    private readonly url: string,
+    private readonly auth: AuthContext,
+    private readonly sessionId: string
+  ) {}
+
+  /** Generic `tools/call` over the streamable HTTP transport. */
+  async callTool(
+    name: string,
+    args: Record<string, unknown>,
+    timeoutMs = 30_000
+  ): Promise<unknown> {
+    const id = this.nextId++;
+    const res = await fetch(this.url, {
+      method: 'POST',
+      headers: {
+        ...this.auth.headers,
+        'mcp-session-id': this.sessionId,
+        'Content-Type': 'application/json',
+        Accept: 'application/json, text/event-stream',
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'tools/call',
+        params: { name, arguments: args },
+        id,
+      }),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!res.ok) {
+      throw new Error(`tools/call ${name}: HTTP ${res.status}`);
+    }
+    const body = await res.text();
+    const response = extractJsonRpcResponse(body, id);
+    if (!response) {
+      throw new Error(`tools/call ${name}: no matching response in body`);
+    }
+    if (response.error) {
+      throw new Error(
+        `tools/call ${name}: ${
+          typeof response.error === 'object' && response.error
+            ? JSON.stringify(response.error)
+            : String(response.error)
+        }`
+      );
+    }
+    return response.result;
+  }
+
+  /** Fetches the caller's unread inbox (DMs + team mail, sender-excluded). */
+  async getMessages(): Promise<InboxMessage[]> {
+    const result = await this.callTool('get_messages', {});
+    const text = extractTextContent(result);
+    const parsed: unknown = JSON.parse(text);
+    if (!Array.isArray(parsed)) {
+      throw new Error('get_messages: expected an array, got something else');
+    }
+    const out: InboxMessage[] = [];
+    for (const item of parsed) {
+      if (isInboxMessage(item)) {
+        out.push(item);
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Marks one message as read. Idempotent server-side, but the handler
+   * returns `isError: true` when the message id is unknown or not owned
+   * by the caller — we surface that as a thrown error so the caller can
+   * decide whether to retry.
+   */
+  async markAsRead(messageId: string): Promise<void> {
+    const result = await this.callTool('mark_as_read', { message_id: messageId });
+    const r = result as { isError?: boolean; content?: Array<{ type?: unknown; text?: unknown }> };
+    if (r.isError) {
+      // Narrow via a local + optional chain instead of a non-null
+      // assertion — the whole point of `noUncheckedIndexedAccess`
+      // (added in PR #2) is to prevent `arr[0]!` bypasses.
+      const first = Array.isArray(r.content) ? r.content[0] : undefined;
+      const text = typeof first?.text === 'string' ? first.text : '(no detail)';
+      throw new Error(`mark_as_read: ${text}`);
+    }
+  }
+}
+
+/**
+ * Pulls the JSON-RPC response with the matching `id` out of a POST body
+ * that may be plain JSON OR a `text/event-stream` SSE frame. The MCP
+ * StreamableHTTPServerTransport can choose either depending on whether the
+ * server-side handler streams — we accept both so we don't have to second-
+ * guess the agent-hub server's framing decisions.
+ *
+ * Exported for future unit tests (CI follow-up).
+ */
+export function extractJsonRpcResponse(
+  body: string,
+  id: number
+): { jsonrpc?: unknown; id?: unknown; result?: unknown; error?: unknown } | null {
+  // Single JSON body.
+  try {
+    const obj = JSON.parse(body) as { id?: unknown };
+    if (obj && typeof obj === 'object' && obj.id === id) {
+      return obj as { id?: unknown; result?: unknown; error?: unknown };
+    }
+  } catch {
+    /* fall through to SSE parse */
+  }
+  // SSE: one `data:` line per JSON-RPC message. Scan for the matching id.
+  for (const rawLine of body.split('\n')) {
+    const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
+    if (!line.startsWith('data:')) continue;
+    const dataStr = line.slice(5).trim();
+    if (!dataStr) continue;
+    try {
+      const obj = JSON.parse(dataStr) as { id?: unknown };
+      if (obj && typeof obj === 'object' && obj.id === id) {
+        return obj as { id?: unknown; result?: unknown; error?: unknown };
+      }
+    } catch {
+      /* keepalive / partial — skip */
+    }
+  }
+  return null;
+}
+
+/**
+ * Pulls the first text-typed content part out of an MCP `CallToolResult`.
+ * Throws on shape mismatches so callers can surface a useful error.
+ *
+ * Exported for future unit tests (CI follow-up).
+ */
+export function extractTextContent(result: unknown): string {
+  const r = result as { content?: unknown };
+  if (!Array.isArray(r.content) || r.content.length === 0) {
+    throw new Error('CallToolResult: expected non-empty content array');
+  }
+  const first = r.content[0] as { type?: unknown; text?: unknown };
+  if (first.type !== 'text' || typeof first.text !== 'string') {
+    throw new Error('CallToolResult: expected first content part to be text');
+  }
+  return first.text;
+}
+
+function isInboxMessage(value: unknown): value is InboxMessage {
+  if (!value || typeof value !== 'object') return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.id === 'string' &&
+    typeof v.from === 'string' &&
+    typeof v.to === 'string' &&
+    typeof v.message === 'string' &&
+    typeof v.timestamp === 'string'
+  );
+}
+
+/**
  * Long-lived inbox watcher. Owns one MCP session + one SSE stream and
  * reconnects on failure (3s backoff, matching watch.sh).
  *
@@ -154,14 +337,15 @@ export function nextBackoffMs(currentMs: number): number {
  *   - `start()` / `stop()` / `dispose()`
  *   - `state` snapshot for the status command
  *   - `onMessage` event for downstream consumers
+ *   - `client` accessor that returns a fresh `AgentHubClient` bound to
+ *     the *current* session (or `null` when not subscribed)
  */
 export class InboxWatcher {
   private running = false;
   private abortController?: AbortController;
   private currentSessionId: string | null = null;
   private currentMode: WatcherMode = 'idle';
-  private currentAuthMode: AuthMode | null = null;
-  private currentUserId: string | null = null;
+  private currentAuth: AuthContext | null = null;
   private readonly emitter = new vscode.EventEmitter<InboxMessageNotification>();
   readonly onMessage: vscode.Event<InboxMessageNotification> = this.emitter.event;
   private readonly loginResolver: LoginResolver;
@@ -182,9 +366,21 @@ export class InboxWatcher {
       running: this.running,
       mode: this.currentMode,
       sessionId: this.currentSessionId,
-      authMode: this.currentAuthMode,
-      userId: this.currentUserId,
+      authMode: this.currentAuth?.mode ?? null,
+      userId: this.currentAuth?.userId ?? null,
     };
+  }
+
+  /**
+   * A short-lived `AgentHubClient` bound to the watcher's *current* session,
+   * or `null` when the watcher is idle / reconnecting / pre-subscribe. The
+   * caller should re-read this property on each operation so that a
+   * concurrent reconnect (which mints a fresh session id) is observed
+   * naturally rather than via a long-lived stale client.
+   */
+  get client(): AgentHubClient | null {
+    if (!this.currentSessionId || !this.currentAuth) return null;
+    return new AgentHubClient(this.cfg.url, this.currentAuth, this.currentSessionId);
   }
 
   /**
@@ -227,8 +423,7 @@ export class InboxWatcher {
       throw err;
     }
 
-    this.currentAuthMode = auth.mode;
-    this.currentUserId = auth.userId;
+    this.currentAuth = auth;
     this.log(
       `auth: mode=${auth.mode} user=${auth.userId} tenant=${this.cfg.tenant || '(default)'} hub=${this.cfg.url}`
     );
@@ -251,6 +446,7 @@ export class InboxWatcher {
       this.abortController = undefined;
       this.currentMode = 'idle';
       this.currentSessionId = null;
+      this.currentAuth = null;
       throw err;
     }
 
@@ -264,6 +460,7 @@ export class InboxWatcher {
     this.abortController?.abort();
     this.currentMode = 'idle';
     this.currentSessionId = null;
+    this.currentAuth = null;
     this.log('stop: watcher halted');
   }
 
@@ -313,6 +510,7 @@ export class InboxWatcher {
     }
     this.currentMode = 'idle';
     this.currentSessionId = null;
+    this.currentAuth = null;
   }
 
   private async initialize(auth: AuthContext): Promise<string> {

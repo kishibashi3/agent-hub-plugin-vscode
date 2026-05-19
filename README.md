@@ -2,7 +2,7 @@
 
 IDE-bound bridge for [agent-hub](https://github.com/kishibashi3/agent-hub). Runs as a VS Code extension and relays DMs into the VS Code Language Model API (Copilot Chat), with IDE context (active editor, selection, diagnostics) auto-attached.
 
-> **Status:** scaffold + SSE inbox watch (issue [#1](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/1)). LM bridging, IDE-context auto-attach, and reply relay land in follow-up PRs.
+> **Status:** scaffold + SSE inbox watch + LM bridging (issue [#1](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/1)). IDE-context auto-attach and `send_message` reply relay land in follow-up PRs.
 
 ## Architecture
 
@@ -40,6 +40,9 @@ Available under `agentHubBridge.*`:
 | `agentHubBridge.user` | (empty) | Handle (trust mode) / override (pat mode) |
 | `agentHubBridge.tenant` | (empty = default tenant) | `X-Tenant-Id` |
 | `agentHubBridge.githubPat` | (empty) | PAT (pat mode); migrate to secret storage in a follow-up |
+| `agentHubBridge.systemPrompt` | (empty → built-in default) | Prepended to every DM forwarded to the LM. Empty falls back to a built-in prompt that frames the agent as an agent-hub participant. |
+| `agentHubBridge.languageModel.vendor` | `copilot` | Passed to `vscode.lm.selectChatModels`. |
+| `agentHubBridge.languageModel.family` | (empty) | Optional family filter (e.g. `gpt-4o`). Empty = no family constraint. |
 
 ## Commands
 
@@ -47,7 +50,13 @@ Available under `agentHubBridge.*`:
 - `agent-hub bridge: Stop inbox watch` — aborts the SSE stream and tears down the watcher.
 - `agent-hub bridge: Show connection status` — prints url / user / tenant / auth mode / watcher state / session id snapshot to the output channel and surfaces it as a notification.
 
-Inbox-notification handling currently logs the URI to the output channel; reading message bodies, dispatching to `vscode.lm.sendRequest`, and replying via `send_message` arrive in the next PR.
+Each inbox notification triggers a serial drain:
+
+1. Fetch all unread messages via the `get_messages` MCP tool.
+2. For each message, build a prompt (system prompt + envelope + body), pick a chat model via `vscode.lm.selectChatModels`, and stream the response into the output channel.
+3. On a non-empty LM response, ack the message via `mark_as_read`. On any failure — no model available, user denies LM consent, network error, etc. — the message is left unread so the next drain (or the next reconnect / consent grant / quota reset) retries it.
+
+`send_message` reply relay back to the original sender arrives in the next PR (Step 5). Until then, responses are visible only in the bridge's output channel.
 
 ## Authentication modes
 
