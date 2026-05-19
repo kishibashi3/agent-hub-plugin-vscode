@@ -7,17 +7,27 @@ import * as vscode from 'vscode';
 
 import {
   BridgeConfig,
-  InboxMessageNotification,
   InboxWatcher,
   LOCALHOST_DEFAULT_URL,
   isDefaultLocalhostUrl,
 } from './agentHub';
+import { LmDispatcher, LmDispatcherConfig } from './lmDispatcher';
 
 const CHANNEL_NAME = 'agent-hub bridge';
+
+const DEFAULT_SYSTEM_PROMPT =
+  'You are an AI agent participating in agent-hub, a multi-agent ' +
+  'collaboration platform. The user has sent you a direct message. ' +
+  'Respond helpfully and concisely. Keep the reply focused on the ' +
+  'message — no excessive greetings, no echoing the prompt back.';
+
+const DEFAULT_JUSTIFICATION =
+  'agent-hub bridge is responding to a DM relayed from another participant.';
 
 let outputChannel: vscode.OutputChannel | undefined;
 let watcher: InboxWatcher | undefined;
 let watcherDisposable: vscode.Disposable | undefined;
+let dispatcher: LmDispatcher | undefined;
 
 function log(msg: string): void {
   const ts = new Date().toISOString();
@@ -38,15 +48,25 @@ function readConfig(): BridgeConfig {
   };
 }
 
-function handleInboxNotification(notification: InboxMessageNotification): void {
-  // Step 2 stops here: we *know* something landed in the inbox. Reading the
-  // message body via `get_messages`, dispatching it to `vscode.lm.sendRequest`,
-  // attaching IDE context, and replying via `send_message` are wired up in
-  // subsequent PRs (Steps 3-5 of issue #1).
-  log(
-    `[event] inbox notification ${notification.uri} at ${notification.receivedAt.toISOString()} ` +
-      '(LM bridging arrives in a follow-up PR)'
-  );
+function readDispatcherConfig(): LmDispatcherConfig {
+  const cfg = vscode.workspace.getConfiguration('agentHubBridge');
+  const systemPrompt = cfg.get<string>('systemPrompt');
+  const vendor = cfg.get<string>('languageModel.vendor') || 'copilot';
+  const family = cfg.get<string>('languageModel.family') || '';
+  // Drop empty-string fields from the selector so VS Code's matcher
+  // doesn't try to look for a model literally named "".
+  const selector: vscode.LanguageModelChatSelector = { vendor };
+  if (family.length > 0) {
+    selector.family = family;
+  }
+  return {
+    systemPrompt:
+      typeof systemPrompt === 'string' && systemPrompt.trim().length > 0
+        ? systemPrompt
+        : DEFAULT_SYSTEM_PROMPT,
+    modelSelector: selector,
+    justification: DEFAULT_JUSTIFICATION,
+  };
 }
 
 async function startWatcher(): Promise<void> {
@@ -81,9 +101,13 @@ async function startWatcher(): Promise<void> {
   }
 
   const w = new InboxWatcher(config, log);
+  const d = new LmDispatcher({ watcher: w, cfg: readDispatcherConfig(), log });
   // Subscribe before start() so we never miss the first event the watcher
-  // emits after subscribe returns.
-  const disposable = w.onMessage(handleInboxNotification);
+  // emits after subscribe returns. The dispatcher's onInboxNotification
+  // requestDrain()s, which then fetches *all* unread messages — so even if
+  // the very first notification fires before this listener attaches, the
+  // post-start drain below picks it up.
+  const disposable = w.onMessage(d.onInboxNotification);
   watcherDisposable = disposable;
 
   try {
@@ -91,6 +115,7 @@ async function startWatcher(): Promise<void> {
   } catch (err) {
     disposable.dispose();
     watcherDisposable = undefined;
+    d.dispose();
     w.dispose();
     const msg = err instanceof Error ? err.message : String(err);
     log(`[ERR] start: ${msg}`);
@@ -99,8 +124,14 @@ async function startWatcher(): Promise<void> {
   }
 
   watcher = w;
+  dispatcher = d;
   outputChannel?.show(true);
   void vscode.window.showInformationMessage('agent-hub bridge: inbox watch started.');
+
+  // Drain anything that arrived while the bridge was offline. SSE only
+  // notifies *new* arrivals, so without this kick existing unread messages
+  // would sit in the inbox until the next DM nudges the pipeline awake.
+  d.requestDrain();
 }
 
 async function stopWatcher(): Promise<void> {
@@ -109,9 +140,12 @@ async function stopWatcher(): Promise<void> {
     return;
   }
   const w = watcher;
+  const d = dispatcher;
   watcher = undefined;
+  dispatcher = undefined;
   watcherDisposable?.dispose();
   watcherDisposable = undefined;
+  d?.dispose();
   await w.stop();
   w.dispose();
   void vscode.window.showInformationMessage('agent-hub bridge: inbox watch stopped.');
@@ -152,6 +186,8 @@ export function activate(context: vscode.ExtensionContext): void {
       dispose: () => {
         watcherDisposable?.dispose();
         watcherDisposable = undefined;
+        dispatcher?.dispose();
+        dispatcher = undefined;
         watcher?.dispose();
         watcher = undefined;
       },
@@ -163,6 +199,8 @@ export function deactivate(): void {
   log('agent-hub bridge deactivated');
   watcherDisposable?.dispose();
   watcherDisposable = undefined;
+  dispatcher?.dispose();
+  dispatcher = undefined;
   watcher?.dispose();
   watcher = undefined;
   outputChannel?.dispose();
