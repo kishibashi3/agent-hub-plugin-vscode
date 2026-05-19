@@ -249,10 +249,11 @@ export class AgentHubClient {
     const result = await this.callTool('mark_as_read', { message_id: messageId });
     const r = result as { isError?: boolean; content?: Array<{ type?: unknown; text?: unknown }> };
     if (r.isError) {
-      const text =
-        Array.isArray(r.content) && typeof r.content[0]?.text === 'string'
-          ? r.content[0]!.text
-          : '(no detail)';
+      // Narrow via a local + optional chain instead of a non-null
+      // assertion — the whole point of `noUncheckedIndexedAccess`
+      // (added in PR #2) is to prevent `arr[0]!` bypasses.
+      const first = Array.isArray(r.content) ? r.content[0] : undefined;
+      const text = typeof first?.text === 'string' ? first.text : '(no detail)';
       throw new Error(`mark_as_read: ${text}`);
     }
   }
