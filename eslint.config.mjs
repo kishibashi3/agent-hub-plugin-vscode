@@ -1,0 +1,124 @@
+// ESLint flat config for agent-hub-bridge-vscode (issue #19).
+//
+// Scope:
+//   - typescript-eslint recommendedTypeChecked rule set across src/ + tests/
+//   - One custom rule: `no-restricted-imports` enforces the vscode-free
+//     split (PR #8) — `protocol.ts` and `promptFormat.ts` must never
+//     `import * as vscode from 'vscode'`. Lifting this from convention to
+//     lint-enforced invariant is the main marginal value over `tsc --strict`.
+//
+// What we deliberately don't include:
+//   - Prettier / stylistic rules — `tsc --strict` covers the bug-bait
+//     stylistic mistakes; a future Prettier addition can layer on top
+//     without disturbing this config.
+//   - `eslint-plugin-import` / `eslint-plugin-unicorn` etc. — plugin
+//     footprint stays minimal; revisit if specific gaps emerge.
+
+import tseslint from 'typescript-eslint';
+
+export default tseslint.config(
+  // 1. Global ignores — paths that ESLint should not visit at all.
+  {
+    ignores: [
+      'out/**',
+      'node_modules/**',
+      '.vscode-test/**',
+      // eslint.config.mjs is ESM and lives outside the TS project graph;
+      // the recommendedTypeChecked rules can't parse it without a
+      // dedicated tsconfig, so we exempt it from the type-aware pass.
+      // (Its content is reviewed by hand and small enough that lint
+      // coverage here adds little.)
+      'eslint.config.mjs',
+    ],
+  },
+
+  // 2. Recommended type-checked rules for the TS sources + tests.
+  ...tseslint.configs.recommendedTypeChecked,
+
+  // 3. Tell typescript-eslint where the project graph is so the
+  //    type-aware rules can resolve imports / inferred types.
+  //    Using `projectService: true` (typescript-eslint v8) so files
+  //    outside the tsconfig's `include` (notably `tests/`) get the
+  //    same type-aware treatment without needing a second tsconfig.
+  {
+    languageOptions: {
+      parserOptions: {
+        // `tests/**/*.test.ts` lives outside the tsconfig's `include`
+        // (which targets src/). `allowDefaultProject` lets the project
+        // service parse those files using the default inferred project,
+        // so the lint pass still gets type-aware coverage without us
+        // maintaining a second tsconfig.
+        projectService: {
+          allowDefaultProject: ['tests/*.test.ts'],
+        },
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+  },
+
+  // Honour the `_`-prefix convention for intentionally-unused args
+  // (e.g. arrow callbacks where the signature is fixed by the API).
+  {
+    rules: {
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
+        },
+      ],
+    },
+  },
+
+  // 4. Vscode-free-module enforcement — PR #8 layered the bridge as
+  //    `protocol.ts` / `promptFormat.ts` (pure, no vscode) re-exported
+  //    by `agentHub.ts` / `ideContext.ts` / `lmDispatcher.ts` (vscode-
+  //    bound). This rule keeps the pure side pure as a lint-enforced
+  //    invariant.
+  {
+    files: ['src/protocol.ts', 'src/promptFormat.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: 'vscode',
+              message:
+                'protocol.ts and promptFormat.ts must remain vscode-free ' +
+                '(PR #8 split). Move the vscode-dependent code into ' +
+                'agentHub.ts / ideContext.ts / lmDispatcher.ts / extension.ts ' +
+                'and re-export through the existing re-export shims.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+
+  // 5. Tests live outside the TS project's `rootDir` but should still
+  //    be lint-covered. The recommendedTypeChecked rules apply, but we
+  //    relax a handful of patterns that come up naturally in node:test
+  //    assertion style and would force boilerplate without catching
+  //    real bugs.
+  {
+    files: ['tests/**/*.test.ts'],
+    rules: {
+      // assert.equal / assert.deepEqual etc. accept `unknown`; the type-
+      // aware rule flags every comparison against a `parsed` JSON value.
+      // Tests are short and human-reviewed, so the noise outweighs signal.
+      '@typescript-eslint/no-unsafe-argument': 'off',
+      // node:test's `describe` / `it` return promises that the runner
+      // manages internally; user code never needs to await them. The
+      // rule wants every `describe(...)` / `it(...)` prefixed with
+      // `void`, which adds zero safety. Off.
+      '@typescript-eslint/no-floating-promises': 'off',
+      // Many `it('…', async () => { assert.equal(…) })` test bodies are
+      // genuinely synchronous. The async wrapping is harmless and lets
+      // future async assertions land without a signature change; the
+      // rule's diagnosis is noise here.
+      '@typescript-eslint/require-await': 'off',
+    },
+  },
+);

@@ -212,13 +212,12 @@ export class AgentHubClient {
       throw new Error(`tools/call ${name}: no matching response in body`);
     }
     if (response.error) {
-      throw new Error(
-        `tools/call ${name}: ${
-          typeof response.error === 'object' && response.error
-            ? JSON.stringify(response.error)
-            : String(response.error)
-        }`
-      );
+      const err = response.error;
+      // `err` is `unknown`. JSON.stringify is the safe stringifier for
+      // both primitive and structured error payloads — primitives stringify
+      // as their literal, objects stringify as JSON, undefined → "null".
+      // `String(obj)` would yield "[object Object]" for the object case.
+      throw new Error(`tools/call ${name}: ${JSON.stringify(err)}`);
     }
     return response.result;
   }
@@ -290,9 +289,9 @@ export function extractJsonRpcResponse(
 ): { jsonrpc?: unknown; id?: unknown; result?: unknown; error?: unknown } | null {
   // Single JSON body.
   try {
-    const obj = JSON.parse(body) as { id?: unknown };
+    const obj = JSON.parse(body) as { id?: unknown; result?: unknown; error?: unknown };
     if (obj && typeof obj === 'object' && obj.id === id) {
-      return obj as { id?: unknown; result?: unknown; error?: unknown };
+      return obj;
     }
   } catch {
     /* fall through to SSE parse */
@@ -304,9 +303,9 @@ export function extractJsonRpcResponse(
     const dataStr = line.slice(5).trim();
     if (!dataStr) continue;
     try {
-      const obj = JSON.parse(dataStr) as { id?: unknown };
+      const obj = JSON.parse(dataStr) as { id?: unknown; result?: unknown; error?: unknown };
       if (obj && typeof obj === 'object' && obj.id === id) {
-        return obj as { id?: unknown; result?: unknown; error?: unknown };
+        return obj;
       }
     } catch {
       /* keepalive / partial — skip */

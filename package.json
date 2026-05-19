@@ -142,6 +142,8 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "typecheck": "tsc --noEmit -p ./",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
     "test": "tsx --test tests/**/*.test.ts",
     "test:watch": "tsx --test --watch tests/**/*.test.ts",
     "package": "vsce package --no-yarn",
@@ -152,7 +154,9 @@
     "@types/node": "^22.10.5",
     "@types/vscode": "^1.95.0",
     "@vscode/vsce": "^3.9.1",
+    "eslint": "^10.4.0",
     "tsx": "^4.22.2",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.59.4"
   }
 }

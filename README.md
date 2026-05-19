@@ -54,13 +54,17 @@ npm install
 npm run compile      # one-shot build to out/
 npm run watch        # incremental build
 npm run typecheck    # no-emit type check
+npm run lint         # ESLint (typescript-eslint recommended-type-checked)
+npm run lint:fix     # autofix lintable rules where possible
 npm test             # unit tests (node:test via tsx)
 npm run test:watch   # tests in watch mode
 ```
 
 Open this folder in VS Code Insiders and press <kbd>F5</kbd> to launch an Extension Development Host.
 
-The unit-test suite targets the vscode-free helpers in `src/protocol.ts` and `src/promptFormat.ts`; the vscode-bound modules (`agentHub.ts` / `ideContext.ts` / `lmDispatcher.ts` / `extension.ts`) are covered by the type checker plus manual smoke-testing in the Extension Development Host. Both `typecheck` and `test` run on every push / PR via the [CI workflow](.github/workflows/ci.yml).
+The unit-test suite targets the vscode-free helpers in `src/protocol.ts` and `src/promptFormat.ts`; the vscode-bound modules (`agentHub.ts` / `ideContext.ts` / `lmDispatcher.ts` / `extension.ts`) are covered by the type checker plus manual smoke-testing in the Extension Development Host. The CI workflow runs `typecheck` + `lint` + `compile` + `test` + `package-check` on every push / PR; the release workflow re-runs the same gates on every `v*.*.*` tag push before building the `.vsix` artefact.
+
+The ESLint config (`eslint.config.mjs`) extends [`typescript-eslint` `recommendedTypeChecked`](https://typescript-eslint.io/users/configs/#recommended-type-checked) and adds one custom rule: `no-restricted-imports` on `src/protocol.ts` / `src/promptFormat.ts` forbids `import * as vscode from 'vscode'`. This lifts the vscode-free / vscode-bound split (see [Module layout](#module-layout) below) from a convention into a lint-enforced invariant.
 
 ## Configuration
 

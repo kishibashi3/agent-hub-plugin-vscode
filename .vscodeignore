@@ -17,6 +17,7 @@ tests/**
 tsconfig.json
 .vscode-test/
 .vscode/
+eslint.config.mjs
 
 # CI / tooling
 .github/
