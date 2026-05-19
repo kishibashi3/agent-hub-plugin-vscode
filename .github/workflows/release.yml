@@ -1,0 +1,98 @@
+name: Release
+
+on:
+  push:
+    tags:
+      # Operator manually pushes a semver tag (e.g. `v0.4.0`) to trigger
+      # a release. The bridge is `private: true` — there is no Marketplace
+      # publish step; the `.vsix` is attached to a GitHub Release for
+      # manual sideload.
+      - 'v*.*.*'
+
+permissions:
+  # `gh release create` writes to the repo's releases on our behalf.
+  contents: write
+
+jobs:
+  release:
+    name: build .vsix + create GitHub Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Belt-and-braces: re-verify the working state before packaging so
+      # we never tag against a non-green commit.
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Compile
+        run: npm run compile
+
+      - name: Test
+        run: npm test
+
+      - name: Package
+        # Output goes to the repo root by default
+        # (`agent-hub-bridge-vscode-<version>.vsix`).
+        run: npm run package
+
+      - name: Locate the produced .vsix
+        id: vsix
+        run: |
+          set -euo pipefail
+          # vsce emits a single .vsix in the repo root; pick it up.
+          vsix="$(ls -1 agent-hub-bridge-vscode-*.vsix | head -n1)"
+          echo "path=${vsix}" >> "$GITHUB_OUTPUT"
+          echo "Built: ${vsix}"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF#refs/tags/}"
+          # If the tag matches a `## [x.y.z]` heading in CHANGELOG.md,
+          # pull that section as the release body. Otherwise fall back
+          # to a stub pointing at the CHANGELOG.
+          version="${tag#v}"
+          changelog_body=""
+          if [ -f CHANGELOG.md ]; then
+            changelog_body=$(awk -v ver="${version}" '
+              BEGIN { in_section = 0 }
+              /^## \[/ {
+                if (in_section) exit
+                if ($0 ~ "^## \\[" ver "\\]") { in_section = 1; next }
+              }
+              in_section { print }
+            ' CHANGELOG.md)
+          fi
+          if [ -z "${changelog_body}" ]; then
+            changelog_body="No CHANGELOG entry found for ${tag}. See [CHANGELOG.md](./CHANGELOG.md)."
+          fi
+
+          # `gh release create` is idempotent only via --notes-file etc;
+          # if the release exists (re-run), prefer to upload the asset
+          # rather than fail.
+          if gh release view "${tag}" >/dev/null 2>&1; then
+            echo "Release ${tag} already exists — uploading asset only."
+            gh release upload "${tag}" "${{ steps.vsix.outputs.path }}" --clobber
+          else
+            echo "Creating release ${tag}…"
+            printf '%s\n' "${changelog_body}" > /tmp/release-body.md
+            gh release create "${tag}" \
+              "${{ steps.vsix.outputs.path }}" \
+              --title "${tag}" \
+              --notes-file /tmp/release-body.md
+          fi

@@ -1,0 +1,44 @@
+# vsce ships the contents of the repo MINUS what's matched here.
+#
+# What we WANT in the .vsix (everything else is excluded):
+#   - out/**/*.js + out/**/*.js.map  (runtime + debug sourcemaps)
+#   - package.json
+#   - README.md
+#   - LICENSE
+#   - CHANGELOG.md
+#
+# Everything else is build artefact / source / dev-only and stays out.
+
+# Source — the compiled out/ is what ships.
+src/**
+tests/**
+
+# Build / dev config
+tsconfig.json
+.vscode-test/
+.vscode/
+
+# CI / tooling
+.github/
+.gitignore
+.gitattributes
+
+# Test / typescript leftovers
+**/*.ts
+!out/**/*.d.ts
+
+# Lockfile + manifests — `package.json` is needed by vsce / VS Code, the
+# lockfile and node_modules are not part of the runtime extension surface.
+package-lock.json
+node_modules/
+
+# Docs we don't ship (PR templates, ADRs, internal notes if any later)
+docs/
+
+# Internal project conventions / role doc — not part of the user-facing
+# distribution.
+CLAUDE.md
+
+# Editor cruft
+*.log
+.DS_Store
