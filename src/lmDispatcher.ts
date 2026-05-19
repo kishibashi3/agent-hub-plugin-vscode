@@ -20,6 +20,13 @@
 import * as vscode from 'vscode';
 
 import type { AgentHubClient, InboxMessage, InboxMessageNotification, InboxWatcher } from './agentHub';
+import {
+  collectIdeContext,
+  EMPTY_IDE_CONTEXT_SNAPSHOT,
+  formatIdeContext,
+  type IdeContextOptions,
+  type IdeContextSnapshot,
+} from './ideContext';
 
 type Logger = (msg: string) => void;
 
@@ -30,6 +37,8 @@ export interface LmDispatcherConfig {
   readonly modelSelector: vscode.LanguageModelChatSelector;
   /** User-facing reason surfaced by VS Code when prompting for LM consent. */
   readonly justification: string;
+  /** IDE-context-capture options. `enabled: false` short-circuits to an empty snapshot. */
+  readonly ideContext: IdeContextOptions;
 }
 
 export interface LmDispatcherDeps {
@@ -43,17 +52,38 @@ export interface LmDispatcherDeps {
   readonly selectChatModels?: (
     selector: vscode.LanguageModelChatSelector
   ) => Thenable<vscode.LanguageModelChat[]>;
+  /**
+   * Test injection point for IDE-context capture. Production passes the
+   * real `collectIdeContext` which reads `vscode.window.activeTextEditor`
+   * + `vscode.languages.getDiagnostics` at call time.
+   */
+  readonly collectIdeContext?: (opts: IdeContextOptions) => IdeContextSnapshot;
 }
 
 /**
- * Pure helper, exported for unit-testing the prompt shape.
- * Step 4 will extend this signature to accept IDE context.
+ * Pure helper that assembles the prompt fed to the LM. Exported for
+ * unit-testing the prompt shape without needing a real VS Code editor.
+ *
+ * Order is deliberate:
+ *
+ *   1. System prompt   — operator-set persona / behaviour
+ *   2. IDE context     — file the developer is looking at right now
+ *   3. Message envelope + body — what the agent-hub peer actually sent
+ *
+ * The IDE context comes *before* the message so the LM can resolve
+ * pronouns like "this bug" or "the file" against the active editor
+ * even when the sender doesn't quote a path.
  */
-export function formatPrompt(systemPrompt: string, msg: InboxMessage): string {
+export function formatPrompt(
+  systemPrompt: string,
+  msg: InboxMessage,
+  ideContext: string
+): string {
   const preamble = systemPrompt.trim();
   const head = preamble.length > 0 ? `${preamble}\n\n---\n\n` : '';
+  const idePart = ideContext.length > 0 ? `${ideContext}\n\n---\n\n` : '';
   return (
-    `${head}You have received a direct message via agent-hub.\n\n` +
+    `${head}${idePart}You have received a direct message via agent-hub.\n\n` +
     `From: ${msg.from}\n` +
     `Message id: ${msg.id}\n` +
     `Sent at: ${msg.timestamp}\n\n` +
@@ -77,9 +107,11 @@ export class LmDispatcher {
   private readonly selectChatModels: (
     selector: vscode.LanguageModelChatSelector
   ) => Thenable<vscode.LanguageModelChat[]>;
+  private readonly collectIdeContext: (opts: IdeContextOptions) => IdeContextSnapshot;
 
   constructor(private readonly deps: LmDispatcherDeps) {
     this.selectChatModels = deps.selectChatModels ?? ((s) => vscode.lm.selectChatModels(s));
+    this.collectIdeContext = deps.collectIdeContext ?? collectIdeContext;
   }
 
   /** Suitable as an `InboxWatcher.onMessage` listener. */
@@ -150,7 +182,40 @@ export class LmDispatcher {
     const model = await this.pickModel();
     if (!model) return; // already logged
 
-    const prompt = formatPrompt(this.deps.cfg.systemPrompt, msg);
+    // Snapshot the IDE *after* model selection so the editor state is as
+    // fresh as possible at the moment the LM is about to read it. Cheap
+    // (synchronous read) so order has no real cost; clarity over speed.
+    let ideSnapshot: IdeContextSnapshot = EMPTY_IDE_CONTEXT_SNAPSHOT;
+    try {
+      ideSnapshot = this.collectIdeContext(this.deps.cfg.ideContext);
+    } catch (err) {
+      // A throwing IDE snapshotter shouldn't break the pipeline — degrade
+      // to "no IDE context" and continue. Log so it's diagnosable.
+      this.deps.log(
+        `[WARN] collectIdeContext threw — proceeding without IDE context: ${errMsg(err)}`
+      );
+    }
+    const ideContextStr = formatIdeContext(ideSnapshot);
+    if (ideSnapshot.activeFile) {
+      const sel = ideSnapshot.selection
+        ? `selection ${ideSnapshot.selection.startLine}-${ideSnapshot.selection.endLine}${
+            ideSnapshot.selection.truncated ? ' (truncated)' : ''
+          }`
+        : ideSnapshot.cursorWindow
+          ? `cursor-window ${ideSnapshot.cursorWindow.startLine}-${ideSnapshot.cursorWindow.endLine}`
+          : 'no selection/window';
+      this.deps.log(
+        `[ide-context] file=${ideSnapshot.activeFile.uri} ` +
+          `lang=${ideSnapshot.activeFile.languageId} ${sel} ` +
+          `diagnostics=${ideSnapshot.diagnostics.length}`
+      );
+    } else if (this.deps.cfg.ideContext.enabled) {
+      // Enabled but no editor focused — note it once per dispatch so the
+      // operator knows the LM saw no IDE context for this reply.
+      this.deps.log('[ide-context] no active text editor — sending message without IDE context');
+    }
+
+    const prompt = formatPrompt(this.deps.cfg.systemPrompt, msg, ideContextStr);
     const chatMessages = [vscode.LanguageModelChatMessage.User(prompt)];
 
     const responseText = await this.runChat(model, chatMessages, msg);
