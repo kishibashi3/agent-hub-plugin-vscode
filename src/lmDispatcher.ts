@@ -27,6 +27,11 @@ import {
   type IdeContextOptions,
   type IdeContextSnapshot,
 } from './ideContext';
+// `formatPrompt` now lives in the vscode-free `./promptFormat` module so
+// it can be unit-tested without a VS Code shim. Re-exported here for
+// public surface compatibility — existing `import { formatPrompt } from
+// './lmDispatcher'` call sites keep working.
+export { formatPrompt } from './promptFormat';
 
 type Logger = (msg: string) => void;
 
@@ -60,36 +65,10 @@ export interface LmDispatcherDeps {
   readonly collectIdeContext?: (opts: IdeContextOptions) => IdeContextSnapshot;
 }
 
-/**
- * Pure helper that assembles the prompt fed to the LM. Exported for
- * unit-testing the prompt shape without needing a real VS Code editor.
- *
- * Order is deliberate:
- *
- *   1. System prompt   — operator-set persona / behaviour
- *   2. IDE context     — file the developer is looking at right now
- *   3. Message envelope + body — what the agent-hub peer actually sent
- *
- * The IDE context comes *before* the message so the LM can resolve
- * pronouns like "this bug" or "the file" against the active editor
- * even when the sender doesn't quote a path.
- */
-export function formatPrompt(
-  systemPrompt: string,
-  msg: InboxMessage,
-  ideContext: string
-): string {
-  const preamble = systemPrompt.trim();
-  const head = preamble.length > 0 ? `${preamble}\n\n---\n\n` : '';
-  const idePart = ideContext.length > 0 ? `${ideContext}\n\n---\n\n` : '';
-  return (
-    `${head}${idePart}You have received a direct message via agent-hub.\n\n` +
-    `From: ${msg.from}\n` +
-    `Message id: ${msg.id}\n` +
-    `Sent at: ${msg.timestamp}\n\n` +
-    `Content:\n${msg.message}`
-  );
-}
+// `formatPrompt` is re-exported above; the implementation now lives in
+// `./promptFormat` so a plain Node test runner can require it without a
+// VS Code shim.
+import { formatPrompt } from './promptFormat';
 
 function truncate(text: string, max: number): string {
   if (text.length <= max) return text;

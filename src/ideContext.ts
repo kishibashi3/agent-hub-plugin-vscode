@@ -1,93 +1,56 @@
-// IDE-context capture for Step 4 of issue #1.
+// IDE-context capture (vscode-bound half).
 //
-// Two-layer split: `collectIdeContext()` snapshots VS Code editor state
-// into a plain `IdeContextSnapshot`, and `formatIdeContext()` turns that
-// snapshot into a markdown block embedded in the LM prompt. The split
-// keeps the prompt-shape logic pure & unit-testable while the editor-
-// API access stays isolated to one function the dispatcher injects.
+// The pure prompt-shaping helpers and snapshot data types live in
+// `./promptFormat.ts` and are re-exported here so existing call sites
+// (`import {…} from './ideContext'`) keep working unchanged. This module's
+// only original content is `collectIdeContext`, which actually reads
+// `vscode.window.activeTextEditor` + `vscode.languages.getDiagnostics`.
 //
-// Design judgments locked in here (mentioned to @planner up front so they
-// are reviewable as defaults rather than buried as constants):
+// Design judgments (locked in PR #5, retained verbatim):
 //
 //   - Active editor only. `vscode.window.activeTextEditor` (not visible/
 //     all/notebook editors). Multi-pane and split-view support is yagni
 //     until a use-case asks for it.
 //   - Configurable caps everywhere — `maxSelectionChars`, `maxDiagnostics`,
-//     `windowLinesAroundCursor`. Defaults below.
+//     `windowLinesAroundCursor`. Defaults in `./promptFormat.ts`.
 //   - No git diff. Out of scope for v1; would require either the
-//     `vscode.git` extension API or shelling out, both of which are PR
-//     of their own. Selection + diagnostics already cover the bulk of
-//     "look at this code" use-cases.
+//     `vscode.git` extension API or shelling out, both PR of their own.
 //   - Cursor-window context (lines around the caret when there's no
 //     selection) so the LM gets *some* code context even when the user
 //     hasn't highlighted anything. Cap at +/- 20 lines by default.
 //   - When `ideContext.enabled = false`, the snapshot is a zero-content
 //     object — `formatIdeContext` returns the empty string and the
 //     prompt looks identical to Step 3 output.
+//   - PR #5 Minor (path a): `maxSelectionChars = 0` SUPPRESSES the
+//     selection block entirely (no cursor-window fall-through; the two
+//     caps stay orthogonal "0 = off" knobs).
 
 import * as vscode from 'vscode';
 
-export interface IdeContextOptions {
-  readonly enabled: boolean;
-  readonly maxSelectionChars: number;
-  readonly maxDiagnostics: number;
-  readonly windowLinesAroundCursor: number;
-}
+import {
+  EMPTY_IDE_CONTEXT_SNAPSHOT,
+  type IdeActiveFile,
+  type IdeContextOptions,
+  type IdeContextSnapshot,
+  type IdeCursorWindow,
+  type IdeDiagnostic,
+  type IdeSelection,
+  type DiagnosticSeverityLabel,
+} from './promptFormat';
 
-// Frozen for `EMPTY_IDE_CONTEXT_SNAPSHOT` parity (PR #5 Suggestion 2) — a
-// caller that accidentally mutates `DEFAULT_IDE_CONTEXT_OPTIONS.enabled = false`
-// would otherwise quietly disable context for everyone else sharing the
-// reference.
-export const DEFAULT_IDE_CONTEXT_OPTIONS: IdeContextOptions = Object.freeze({
-  enabled: true,
-  maxSelectionChars: 4000,
-  maxDiagnostics: 20,
-  windowLinesAroundCursor: 20,
-});
-
-export type DiagnosticSeverityLabel = 'error' | 'warning' | 'info' | 'hint';
-
-export interface IdeDiagnostic {
-  readonly line: number; // 1-indexed
-  readonly severity: DiagnosticSeverityLabel;
-  readonly source: string; // empty string when unknown
-  readonly message: string;
-}
-
-export interface IdeActiveFile {
-  readonly uri: string;
-  readonly languageId: string;
-  /** 1-indexed cursor position. */
-  readonly cursorLine: number;
-  readonly cursorColumn: number;
-}
-
-export interface IdeSelection {
-  /** 1-indexed inclusive line range. */
-  readonly startLine: number;
-  readonly endLine: number;
-  readonly text: string;
-  readonly truncated: boolean;
-}
-
-export interface IdeCursorWindow {
-  /** 1-indexed inclusive line range. */
-  readonly startLine: number;
-  readonly endLine: number;
-  readonly text: string;
-}
-
-export interface IdeContextSnapshot {
-  readonly activeFile?: IdeActiveFile;
-  readonly selection?: IdeSelection;
-  readonly cursorWindow?: IdeCursorWindow;
-  readonly diagnostics: readonly IdeDiagnostic[];
-}
-
-/** Sentinel snapshot returned when context is disabled or no editor is focused. */
-export const EMPTY_IDE_CONTEXT_SNAPSHOT: IdeContextSnapshot = Object.freeze({
-  diagnostics: Object.freeze([]),
-});
+// Re-exports for public surface compatibility.
+export {
+  DEFAULT_IDE_CONTEXT_OPTIONS,
+  type DiagnosticSeverityLabel,
+  EMPTY_IDE_CONTEXT_SNAPSHOT,
+  formatIdeContext,
+  type IdeActiveFile,
+  type IdeContextOptions,
+  type IdeContextSnapshot,
+  type IdeCursorWindow,
+  type IdeDiagnostic,
+  type IdeSelection,
+} from './promptFormat';
 
 /**
  * Snapshot the current VS Code editor state. Synchronous read of
@@ -176,61 +139,6 @@ export function collectIdeContext(opts: IdeContextOptions): IdeContextSnapshot {
     diagnostics,
   };
   return snapshot;
-}
-
-/**
- * Render an `IdeContextSnapshot` as a markdown block embedded in the LM
- * prompt. Returns the empty string when the snapshot carries nothing
- * (so callers can drop the surrounding separator without an extra check).
- *
- * Pure function — exported for unit-testing the prompt shape without
- * needing a real VS Code editor.
- */
-export function formatIdeContext(snapshot: IdeContextSnapshot): string {
-  const parts: string[] = [];
-
-  if (snapshot.activeFile) {
-    parts.push('## IDE context');
-    parts.push('');
-    parts.push(
-      `Active file: \`${snapshot.activeFile.uri}\` (${snapshot.activeFile.languageId})`
-    );
-    parts.push(
-      `Cursor: line ${snapshot.activeFile.cursorLine}, column ${snapshot.activeFile.cursorColumn}`
-    );
-    parts.push('');
-  }
-
-  if (snapshot.selection) {
-    const range = `lines ${snapshot.selection.startLine}-${snapshot.selection.endLine}`;
-    const suffix = snapshot.selection.truncated ? ', truncated' : '';
-    parts.push(`### Selection (${range}${suffix})`);
-    parts.push('```');
-    parts.push(snapshot.selection.text);
-    parts.push('```');
-    parts.push('');
-  } else if (snapshot.cursorWindow) {
-    parts.push(
-      `### Window around cursor (lines ${snapshot.cursorWindow.startLine}-${snapshot.cursorWindow.endLine})`
-    );
-    parts.push('```');
-    parts.push(snapshot.cursorWindow.text);
-    parts.push('```');
-    parts.push('');
-  }
-
-  if (snapshot.diagnostics.length > 0) {
-    parts.push(`### Diagnostics (${snapshot.diagnostics.length} item(s))`);
-    for (const d of snapshot.diagnostics) {
-      const src = d.source.length > 0 ? `[${d.source}] ` : '';
-      parts.push(`- line ${d.line} ${d.severity}: ${src}${d.message}`);
-    }
-    parts.push('');
-  }
-
-  // Trim trailing whitespace — `parts.join('\n')` leaves a blank line at
-  // the bottom we don't want adjacent to the prompt separator.
-  return parts.join('\n').trimEnd();
 }
 
 function severityLabel(sev: vscode.DiagnosticSeverity): DiagnosticSeverityLabel {
