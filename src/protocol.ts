@@ -59,6 +59,60 @@ export interface InboxMessage {
 }
 
 /**
+ * Output of `resolvePatPrecedence` — the per-source decision for which
+ * GitHub PAT the bridge should use. The dispatcher feeds `value` into the
+ * existing `resolveAuth` path; `extension.ts` consults `source` /
+ * `shadowed` for one-time UX warnings (e.g. "your plaintext setting is
+ * being shadowed by a stored secret").
+ */
+export interface PatSource {
+  /** The PAT to use, trimmed. Empty string when `source === 'none'`. */
+  readonly value: string;
+  readonly source: 'secret' | 'setting' | 'none';
+  /** True when BOTH a non-empty secret AND a non-empty setting are present. */
+  readonly shadowed: boolean;
+}
+
+/**
+ * Decides which PAT the bridge should use given the values available from
+ * VS Code's `SecretStorage` and the legacy `agentHubBridge.githubPat`
+ * setting. Pure function — exported for unit-testing.
+ *
+ * Rules:
+ *   - Secret wins over setting (the explicit migration target).
+ *   - Whitespace-only values from either source are treated as absent so
+ *     a user who accidentally typed only spaces doesn't trigger a false
+ *     `shadowed` warning.
+ *   - The returned `value` is trimmed; GitHub PATs never legitimately
+ *     contain whitespace, so trimming protects against paste-with-newline.
+ */
+export function resolvePatPrecedence(
+  secret: string | undefined,
+  setting: string | undefined
+): PatSource {
+  const secretTrimmed = (secret ?? '').trim();
+  const settingTrimmed = (setting ?? '').trim();
+  const secretPresent = secretTrimmed.length > 0;
+  const settingPresent = settingTrimmed.length > 0;
+
+  if (secretPresent) {
+    return {
+      value: secretTrimmed,
+      source: 'secret',
+      shadowed: settingPresent,
+    };
+  }
+  if (settingPresent) {
+    return {
+      value: settingTrimmed,
+      source: 'setting',
+      shadowed: false,
+    };
+  }
+  return { value: '', source: 'none', shadowed: false };
+}
+
+/**
  * The package.json default for `agentHubBridge.url`. Kept here so the
  * redline #1 startup check can compare against the canonical value (and
  * reviewers can grep this constant when auditing the rule).
@@ -133,7 +187,13 @@ export async function resolveAuth(
   );
 }
 
-async function fetchGitHubLogin(pat: string): Promise<string | null> {
+/**
+ * Resolves the GitHub login that owns a PAT by hitting `https://api.github.com/user`.
+ * Returns `null` on any failure (network error, revoked PAT, non-2xx, missing
+ * `login` field). Exported so the `agentHubBridge.setGithubPat` command can
+ * validate the PAT before storing it in `SecretStorage` (issue #9).
+ */
+export async function fetchGitHubLogin(pat: string): Promise<string | null> {
   try {
     const res = await fetch('https://api.github.com/user', {
       headers: {

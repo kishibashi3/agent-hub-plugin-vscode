@@ -58,7 +58,7 @@ Available under `agentHubBridge.*`:
 | `agentHubBridge.url` | `http://localhost:3000/mcp` | agent-hub MCP endpoint. **Default is a dev-localhost value — override before connecting to any non-local deployment.** Production / Pi5 / remote tenants must set this explicitly; the follow-up SSE-watch PR will additionally `console.warn` (or refuse to start) when this is left at the default in a non-dev environment, per the ecosystem "no silent production fallback" rule (= redline #1). |
 | `agentHubBridge.user` | (empty) | Handle (trust mode) / override (pat mode) |
 | `agentHubBridge.tenant` | (empty = default tenant) | `X-Tenant-Id` |
-| `agentHubBridge.githubPat` | (empty) | PAT (pat mode); migrate to secret storage in a follow-up |
+| `agentHubBridge.githubPat` | (empty) | **DEPRECATED — use the `agent-hub bridge: Set GitHub PAT` command** so the value lands in VS Code SecretStorage instead of plaintext. Read as a legacy fallback; auto-migrated into secret storage on next start. See the [Secrets](#secrets) section. |
 | `agentHubBridge.systemPrompt` | (empty → built-in default) | Prepended to every DM forwarded to the LM. Empty falls back to a built-in prompt that frames the agent as an agent-hub participant. |
 | `agentHubBridge.languageModel.vendor` | `copilot` | Passed to `vscode.lm.selectChatModels`. |
 | `agentHubBridge.languageModel.family` | (empty) | Optional family filter (e.g. `gpt-4o`). Empty = no family constraint. |
@@ -101,6 +101,23 @@ Cursor: line 42, column 8
 When there's no selection, a configurable window of lines around the caret is included instead. When there's no active text editor (e.g. the user is on the output channel), the block is omitted entirely and a `[ide-context] no active text editor` line is logged.
 
 When the original sender is a `@team-…` handle, the reply goes to the team (matching agent-hub's `send_message` routing). When `LM` returns an empty response the message is left unread — the bridge errs on the side of "no signal is better than a misleading empty reply."
+
+## Secrets
+
+GitHub PATs are stored in [VS Code SecretStorage](https://code.visualstudio.com/api/references/vscode-api#SecretStorage) — backed by the OS keychain (Keychain on macOS, libsecret on Linux, DPAPI on Windows) — so the value never sits in `settings.json` and doesn't ride along when you commit / sync / back up that file.
+
+Commands:
+
+- `agent-hub bridge: Set GitHub PAT (secret storage)` — prompts via a masked input box, validates the PAT against `https://api.github.com/user`, then stores it. A bad PAT (revoked, expired, wrong scope) is rejected before anything touches the keychain.
+- `agent-hub bridge: Clear GitHub PAT (secret storage)` — modal confirmation, then `secrets.delete`.
+
+Read precedence at startup:
+
+1. **Secret storage** (preferred)
+2. **`agentHubBridge.githubPat` setting** (legacy fallback)
+3. None — trust mode if `agentHubBridge.user` is set, otherwise startup fails with a clear error.
+
+On the first `Start inbox watch` after upgrading from a version that read the plaintext setting, the bridge auto-copies the setting into secret storage and surfaces a warning popup with an "Open settings.json" action so you can remove the redundant plaintext copy. When both sources are populated, the secret value wins and a one-time `[WARN]` line is logged about the shadowed setting.
 
 ## Authentication modes
 
