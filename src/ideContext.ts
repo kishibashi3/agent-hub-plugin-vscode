@@ -34,23 +34,58 @@ import {
   type IdeContextSnapshot,
   type IdeCursorWindow,
   type IdeDiagnostic,
+  type IdeGitChange,
+  type IdeGitChangeStatus,
+  type IdeGitDiff,
+  type IdeGitDiffOptions,
   type IdeSelection,
   type DiagnosticSeverityLabel,
+  truncateDiff,
 } from './promptFormat';
+import type { GitAPI, GitExtension, Repository } from './vscodeGit';
 
 // Re-exports for public surface compatibility.
 export {
   DEFAULT_IDE_CONTEXT_OPTIONS,
   type DiagnosticSeverityLabel,
   EMPTY_IDE_CONTEXT_SNAPSHOT,
+  formatGitDiffBlock,
   formatIdeContext,
   type IdeActiveFile,
   type IdeContextOptions,
   type IdeContextSnapshot,
   type IdeCursorWindow,
   type IdeDiagnostic,
+  type IdeGitChange,
+  type IdeGitChangeStatus,
+  type IdeGitDiff,
+  type IdeGitDiffOptions,
   type IdeSelection,
+  truncateDiff,
 } from './promptFormat';
+
+// ---------------------------------------------------------------------------
+// Working-tree subset of the upstream `vscode.git` `Status` enum. Mirrored
+// here as numeric constants because `.d.ts` files can't export runtime
+// values (see `./vscodeGit.d.ts` for the type-only API surface).
+//
+// Upstream source: https://github.com/microsoft/vscode/blob/main/extensions/git/src/api/git.d.ts
+// Keep in sync if the enum ever shifts.
+// ---------------------------------------------------------------------------
+const GIT_STATUS_INDEX_RENAMED = 3;
+const GIT_STATUS_MODIFIED = 5;
+const GIT_STATUS_DELETED = 6;
+const GIT_STATUS_UNTRACKED = 7;
+const GIT_STATUS_IGNORED = 8;
+const GIT_STATUS_INTENT_TO_ADD = 9;
+const GIT_STATUS_TYPE_CHANGED = 11;
+const GIT_STATUS_ADDED_BY_US = 12;
+const GIT_STATUS_ADDED_BY_THEM = 13;
+const GIT_STATUS_DELETED_BY_US = 14;
+const GIT_STATUS_DELETED_BY_THEM = 15;
+const GIT_STATUS_BOTH_ADDED = 16;
+const GIT_STATUS_BOTH_DELETED = 17;
+const GIT_STATUS_BOTH_MODIFIED = 18;
 
 /**
  * Snapshot the current VS Code editor state. Synchronous read of
@@ -62,7 +97,7 @@ export {
  *   - There is no active text editor (e.g. user has focus on the output
  *     channel, settings view, or a non-text widget)
  */
-export function collectIdeContext(opts: IdeContextOptions): IdeContextSnapshot {
+export async function collectIdeContext(opts: IdeContextOptions): Promise<IdeContextSnapshot> {
   if (!opts.enabled) {
     return EMPTY_IDE_CONTEXT_SNAPSHOT;
   }
@@ -132,13 +167,160 @@ export function collectIdeContext(opts: IdeContextOptions): IdeContextSnapshot {
     message: d.message,
   }));
 
+  const gitDiff = opts.gitDiff.enabled
+    ? await collectGitDiff(doc.uri, opts.gitDiff)
+    : undefined;
+
   const snapshot: IdeContextSnapshot = {
     activeFile,
     ...(sel ? { selection: sel } : {}),
     ...(window ? { cursorWindow: window } : {}),
     diagnostics,
+    ...(gitDiff ? { gitDiff } : {}),
   };
   return snapshot;
+}
+
+/**
+ * Best-effort working-tree diff snapshot for the repo owning `docUri`.
+ * Returns `undefined` when:
+ *   - The `vscode.git` extension is missing / disabled
+ *   - The doc isn't tracked by any repo
+ *   - Any unexpected throw from the git API
+ *
+ * Errors are swallowed (with a debug-grade no-op) because a snapshot
+ * collector must never break the dispatch pipeline — the dispatcher's
+ * `[ide-context]` log line still fires either way, and the LM just sees
+ * the snapshot without a `gitDiff` section.
+ */
+async function collectGitDiff(
+  docUri: vscode.Uri,
+  opts: IdeGitDiffOptions
+): Promise<IdeGitDiff | undefined> {
+  let repo: Repository | null;
+  let api: GitAPI;
+  try {
+    const ext = vscode.extensions.getExtension<GitExtension>('vscode.git');
+    if (!ext?.exports?.enabled) {
+      return undefined;
+    }
+    api = ext.exports.getAPI(1);
+    repo = api.getRepository(docUri);
+  } catch {
+    return undefined;
+  }
+  if (!repo) return undefined;
+
+  const branchName = repo.state.HEAD?.name ?? '';
+  const workspaceFolder = vscode.workspace.getWorkspaceFolder(repo.rootUri);
+  const repoPath = workspaceFolder
+    ? vscode.workspace.asRelativePath(repo.rootUri, false)
+    : repo.rootUri.fsPath;
+  const repoPathRelative = repoPath === '.' ? '' : repoPath;
+
+  // Filter by `includeUntracked` + ignored, sort, cap.
+  const raw = repo.state.workingTreeChanges.filter((c) => {
+    if (c.status === GIT_STATUS_IGNORED) return false;
+    if (c.status === GIT_STATUS_UNTRACKED && !opts.includeUntracked) return false;
+    return true;
+  });
+  const sorted = [...raw].sort((a, b) => {
+    const sa = sortKeyForStatus(a.status);
+    const sb = sortKeyForStatus(b.status);
+    if (sa !== sb) return sa - sb;
+    return a.uri.fsPath.localeCompare(b.uri.fsPath);
+  });
+  const surviving = opts.maxFiles > 0 ? sorted.slice(0, opts.maxFiles) : [];
+  const truncatedFileCount = sorted.length - surviving.length;
+
+  const changes: IdeGitChange[] = [];
+  for (const change of surviving) {
+    const status = toIdeChangeStatus(change.status);
+    const relativePath = workspaceFolder
+      ? vscode.workspace.asRelativePath(change.uri, false)
+      : change.uri.fsPath;
+
+    let diffBody = '';
+    let diffTruncated = false;
+    if (opts.maxCharsPerFile > 0) {
+      try {
+        const raw = await repo.diffWithHEAD(change.uri.fsPath);
+        const truncated = truncateDiff(raw, opts.maxCharsPerFile);
+        diffBody = truncated.text;
+        diffTruncated = truncated.truncated;
+      } catch {
+        // Untracked / deleted files can throw on diffWithHEAD; surface as
+        // an empty body so the LM still sees the path + status, just
+        // without a diff hunk.
+        diffBody = '';
+        diffTruncated = false;
+      }
+    }
+
+    changes.push({
+      path: relativePath,
+      status,
+      diff: diffBody,
+      diffTruncated,
+    });
+  }
+
+  return {
+    repoPath: repoPathRelative,
+    branchName,
+    changes,
+    truncatedFileCount,
+  };
+}
+
+/**
+ * Sort key for working-tree changes — lower comes first in the prompt.
+ * Order: modified → added → deleted → renamed → conflicted → untracked → other.
+ */
+function sortKeyForStatus(status: number): number {
+  const mapped = toIdeChangeStatus(status);
+  switch (mapped) {
+    case 'modified':
+      return 0;
+    case 'added':
+      return 1;
+    case 'deleted':
+      return 2;
+    case 'renamed':
+      return 3;
+    case 'conflicted':
+      return 4;
+    case 'untracked':
+      return 5;
+    case 'other':
+      return 6;
+  }
+}
+
+function toIdeChangeStatus(status: number): IdeGitChangeStatus {
+  switch (status) {
+    case GIT_STATUS_MODIFIED:
+    case GIT_STATUS_TYPE_CHANGED:
+      return 'modified';
+    case GIT_STATUS_INTENT_TO_ADD:
+      return 'added';
+    case GIT_STATUS_DELETED:
+      return 'deleted';
+    case GIT_STATUS_INDEX_RENAMED:
+      return 'renamed';
+    case GIT_STATUS_UNTRACKED:
+      return 'untracked';
+    case GIT_STATUS_ADDED_BY_US:
+    case GIT_STATUS_ADDED_BY_THEM:
+    case GIT_STATUS_DELETED_BY_US:
+    case GIT_STATUS_DELETED_BY_THEM:
+    case GIT_STATUS_BOTH_ADDED:
+    case GIT_STATUS_BOTH_DELETED:
+    case GIT_STATUS_BOTH_MODIFIED:
+      return 'conflicted';
+    default:
+      return 'other';
+  }
 }
 
 function severityLabel(sev: vscode.DiagnosticSeverity): DiagnosticSeverityLabel {

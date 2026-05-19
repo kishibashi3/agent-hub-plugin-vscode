@@ -104,6 +104,10 @@ function readIdeContextOptions(
   const maxSelChars = cfg.get<number>('ideContext.maxSelectionChars');
   const maxDiag = cfg.get<number>('ideContext.maxDiagnostics');
   const windowLines = cfg.get<number>('ideContext.windowLinesAroundCursor');
+  const gitEnabled = cfg.get<boolean>('ideContext.gitDiff.enabled');
+  const gitMaxFiles = cfg.get<number>('ideContext.gitDiff.maxFiles');
+  const gitMaxCharsPerFile = cfg.get<number>('ideContext.gitDiff.maxCharsPerFile');
+  const gitIncludeUntracked = cfg.get<boolean>('ideContext.gitDiff.includeUntracked');
   return {
     enabled: typeof enabled === 'boolean' ? enabled : DEFAULT_IDE_CONTEXT_OPTIONS.enabled,
     maxSelectionChars: nonNegativeInt(
@@ -115,6 +119,24 @@ function readIdeContextOptions(
       windowLines,
       DEFAULT_IDE_CONTEXT_OPTIONS.windowLinesAroundCursor
     ),
+    gitDiff: {
+      enabled:
+        typeof gitEnabled === 'boolean'
+          ? gitEnabled
+          : DEFAULT_IDE_CONTEXT_OPTIONS.gitDiff.enabled,
+      maxFiles: nonNegativeInt(
+        gitMaxFiles,
+        DEFAULT_IDE_CONTEXT_OPTIONS.gitDiff.maxFiles
+      ),
+      maxCharsPerFile: nonNegativeInt(
+        gitMaxCharsPerFile,
+        DEFAULT_IDE_CONTEXT_OPTIONS.gitDiff.maxCharsPerFile
+      ),
+      includeUntracked:
+        typeof gitIncludeUntracked === 'boolean'
+          ? gitIncludeUntracked
+          : DEFAULT_IDE_CONTEXT_OPTIONS.gitDiff.includeUntracked,
+    },
   };
 }
 
@@ -265,7 +287,21 @@ async function maybeMigratePatToSecretStorage(
     return;
   }
 
-  await context.secrets.store(SECRET_KEY_GITHUB_PAT, settingPat);
+  // PR #10 Suggestion 1 fold-in: `secrets.store` is a security-sensitive
+  // operation that can plausibly fail (locked keychain, permission denied,
+  // OS keychain daemon missing). Swallow + surface so the user sees a
+  // clear error instead of a silent no-op.
+  try {
+    await context.secrets.store(SECRET_KEY_GITHUB_PAT, settingPat);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log(`[ERR] migration: secrets.store failed — ${msg}`);
+    void vscode.window.showErrorMessage(
+      `agent-hub bridge: could not migrate agentHubBridge.githubPat into secret storage (${msg}). ` +
+        'The plaintext setting will continue to be used as a fallback.'
+    );
+    return;
+  }
   log(
     '[migration] copied agentHubBridge.githubPat from settings.json into VS Code secret storage'
   );
@@ -317,7 +353,20 @@ async function setGithubPatCommand(context: vscode.ExtensionContext): Promise<vo
     return;
   }
 
-  await context.secrets.store(SECRET_KEY_GITHUB_PAT, trimmed);
+  // PR #10 Suggestion 1 fold-in: `secrets.store` can fail (locked keychain
+  // etc.) — surface the underlying error so the user knows their PAT
+  // wasn't actually persisted.
+  try {
+    await context.secrets.store(SECRET_KEY_GITHUB_PAT, trimmed);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log(`[ERR] setGithubPat: secrets.store failed — ${msg}`);
+    void vscode.window.showErrorMessage(
+      `agent-hub bridge: could not store PAT in secret storage (${msg}). ` +
+        'No value was persisted.'
+    );
+    return;
+  }
   log(`[secret] stored agentHubBridge.githubPat (validated for GitHub user @${login})`);
   // Reset the per-session shadow warning so a freshly-stored secret
   // re-triggers the warning if the legacy setting is still present.
@@ -342,7 +391,20 @@ async function clearGithubPatCommand(context: vscode.ExtensionContext): Promise<
     'Clear'
   );
   if (choice !== 'Clear') return;
-  await context.secrets.delete(SECRET_KEY_GITHUB_PAT);
+  // PR #10 Suggestion 1 fold-in: `secrets.delete` can fail the same way
+  // `secrets.store` can. Surface the error rather than silently leaving
+  // the stale value in place.
+  try {
+    await context.secrets.delete(SECRET_KEY_GITHUB_PAT);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log(`[ERR] clearGithubPat: secrets.delete failed — ${msg}`);
+    void vscode.window.showErrorMessage(
+      `agent-hub bridge: could not clear PAT from secret storage (${msg}). ` +
+        'The stored value still exists; retry, or check OS keychain access.'
+    );
+    return;
+  }
   log('[secret] cleared agentHubBridge.githubPat from secret storage');
   // Allow the shadow warning to fire again on the next readConfig.
   shadowWarnedThisSession = false;
