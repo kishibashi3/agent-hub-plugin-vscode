@@ -106,11 +106,14 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "typecheck": "tsc --noEmit -p ./",
+    "test": "tsx --test tests/**/*.test.ts",
+    "test:watch": "tsx --test --watch tests/**/*.test.ts",
     "vscode:prepublish": "npm run compile"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
     "@types/vscode": "^1.95.0",
+    "tsx": "^4.22.2",
     "typescript": "^5.7.2"
   }
 }

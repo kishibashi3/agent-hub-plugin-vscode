@@ -1,8 +1,10 @@
 # agent-hub-bridge-vscode
 
+[![CI](https://github.com/kishibashi3/agent-hub-bridge-vscode/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/kishibashi3/agent-hub-bridge-vscode/actions/workflows/ci.yml)
+
 IDE-bound bridge for [agent-hub](https://github.com/kishibashi3/agent-hub). Runs as a VS Code extension and relays DMs into the VS Code Language Model API (Copilot Chat), with IDE context (active editor, selection, diagnostics) auto-attached.
 
-> **Status:** complete (issue [#1](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/1) — scaffold + SSE inbox watch + LM bridging + IDE-context auto-attach + `send_message` reply relay). Follow-ups: CI, `SecretStorage` migration, `vscode.git` diff attach.
+> **Status:** complete (issue [#1](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/1) — scaffold + SSE inbox watch + LM bridging + IDE-context auto-attach + `send_message` reply relay). Follow-ups: CI ([#7](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/7)), `SecretStorage` migration, `vscode.git` diff attach.
 
 ## Architecture
 
@@ -15,6 +17,19 @@ VS Code (Insiders)
         └── reply → agent-hub send_message
 ```
 
+### Module layout
+
+The source is split into a **vscode-free protocol / prompt-shaping core** and a **vscode-bound integration layer** so the pure helpers can be unit-tested with plain Node (`node:test` via `tsx`) without a VS Code shim.
+
+| File | Imports `vscode`? | Contents |
+|---|---|---|
+| `src/protocol.ts` | no | MCP types, constants, pure helpers (`extractJsonRpcResponse`, `extractTextContent`, `nextBackoffMs`, `resolveAuth`, `isDefaultLocalhostUrl`) + `AgentHubClient` (uses only `fetch`) |
+| `src/promptFormat.ts` | no | `formatPrompt`, `formatIdeContext`, IDE-snapshot data types, `DEFAULT_IDE_CONTEXT_OPTIONS`, `EMPTY_IDE_CONTEXT_SNAPSHOT` |
+| `src/agentHub.ts` | yes | `InboxWatcher` (vscode.EventEmitter) — re-exports the protocol layer for surface compatibility |
+| `src/ideContext.ts` | yes | `collectIdeContext` (vscode.window.activeTextEditor + vscode.languages.getDiagnostics) — re-exports the prompt-format layer |
+| `src/lmDispatcher.ts` | yes | `LmDispatcher` (vscode.lm.sendRequest) — re-exports `formatPrompt` |
+| `src/extension.ts` | yes | `activate`/`deactivate`, command wiring, settings glue |
+
 ## Why VS Code Insiders?
 
 The Language Model API (`vscode.lm`) is a [proposed API](https://code.visualstudio.com/api/advanced-topics/using-proposed-api), so the extension declares `enabledApiProposals: ["languageModels"]` in `package.json` and must run on VS Code Insiders (or a stabilized future release).
@@ -23,12 +38,16 @@ The Language Model API (`vscode.lm`) is a [proposed API](https://code.visualstud
 
 ```bash
 npm install
-npm run compile      # one-shot
-npm run watch        # incremental
+npm run compile      # one-shot build to out/
+npm run watch        # incremental build
 npm run typecheck    # no-emit type check
+npm test             # unit tests (node:test via tsx)
+npm run test:watch   # tests in watch mode
 ```
 
 Open this folder in VS Code Insiders and press <kbd>F5</kbd> to launch an Extension Development Host.
+
+The unit-test suite targets the vscode-free helpers in `src/protocol.ts` and `src/promptFormat.ts`; the vscode-bound modules (`agentHub.ts` / `ideContext.ts` / `lmDispatcher.ts` / `extension.ts`) are covered by the type checker plus manual smoke-testing in the Extension Development Host. Both `typecheck` and `test` run on every push / PR via the [CI workflow](.github/workflows/ci.yml).
 
 ## Configuration
 
