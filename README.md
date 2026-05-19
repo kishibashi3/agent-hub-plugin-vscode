@@ -34,6 +34,19 @@ The source is split into a **vscode-free protocol / prompt-shaping core** and a 
 
 The Language Model API (`vscode.lm`) is a [proposed API](https://code.visualstudio.com/api/advanced-topics/using-proposed-api), so the extension declares `enabledApiProposals: ["languageModels"]` in `package.json` and must run on VS Code Insiders (or a stabilized future release).
 
+## Install
+
+This extension is **not on the VS Code Marketplace** (`private: true`) — it ships as a sideloadable `.vsix` attached to each GitHub Release. To install:
+
+1. Grab the latest `agent-hub-bridge-vscode-<version>.vsix` from the [Releases page](https://github.com/kishibashi3/agent-hub-bridge-vscode/releases).
+2. Install it into VS Code Insiders:
+   ```bash
+   code-insiders --install-extension agent-hub-bridge-vscode-<version>.vsix
+   ```
+3. Reload VS Code Insiders.
+
+See [`CHANGELOG.md`](./CHANGELOG.md) for the per-release history.
+
 ## Develop
 
 ```bash

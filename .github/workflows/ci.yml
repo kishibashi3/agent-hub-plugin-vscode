@@ -41,3 +41,32 @@ jobs:
 
       - name: Test
         run: npm test
+
+  package-check:
+    # Verifies the .vsix can be built end-to-end against the actual
+    # build output — catches broken `.vscodeignore`, missing LICENSE,
+    # invalid manifest, etc. on every PR / push without producing a
+    # release artefact.
+    name: vsce package (verify .vsix can be built)
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Compile (vsce won't run vscode:prepublish without out/)
+        run: npm run compile
+
+      - name: Build .vsix to /tmp
+        run: npm run package:check
