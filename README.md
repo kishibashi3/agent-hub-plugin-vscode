@@ -2,7 +2,7 @@
 
 IDE-bound bridge for [agent-hub](https://github.com/kishibashi3/agent-hub). Runs as a VS Code extension and relays DMs into the VS Code Language Model API (Copilot Chat), with IDE context (active editor, selection, diagnostics) auto-attached.
 
-> **Status:** scaffold (issue [#1](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/1)). Inbox watch and LM bridging land in follow-up PRs.
+> **Status:** scaffold + SSE inbox watch (issue [#1](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/1)). LM bridging, IDE-context auto-attach, and reply relay land in follow-up PRs.
 
 ## Architecture
 
@@ -43,9 +43,21 @@ Available under `agentHubBridge.*`:
 
 ## Commands
 
-- `agent-hub bridge: Start inbox watch` — begin SSE subscription (not yet implemented)
-- `agent-hub bridge: Stop inbox watch` — stop the subscription
-- `agent-hub bridge: Show connection status` — print current config / state to the output channel
+- `agent-hub bridge: Start inbox watch` — open an MCP session, subscribe to `inbox://@<user>`, and stream notifications via SSE. Reconnects automatically with exponential back-off (3 s → 6 s → 12 s → … capped at 60 s, reset on every successful re-subscribe). Pre-flight: warns if `agentHubBridge.url` is at the dev-localhost default — both via the output channel and a dismissible popup with an "Open Settings" action (redline #1) — and if `tenant` is unset (then connects to the default tenant).
+- `agent-hub bridge: Stop inbox watch` — aborts the SSE stream and tears down the watcher.
+- `agent-hub bridge: Show connection status` — prints url / user / tenant / auth mode / watcher state / session id snapshot to the output channel and surfaces it as a notification.
+
+Inbox-notification handling currently logs the URI to the output channel; reading message bodies, dispatching to `vscode.lm.sendRequest`, and replying via `send_message` arrive in the next PR.
+
+## Authentication modes
+
+| Mode | Settings | Server requirement |
+|---|---|---|
+| **trust** | `agentHubBridge.user` only | server `AUTH_MODE=trust` (localhost dev) |
+| **pat** | `agentHubBridge.githubPat` only | server `AUTH_MODE=pat`; handle = GitHub login |
+| **pat + override** | `agentHubBridge.githubPat` + `agentHubBridge.user` | server `AUTH_MODE=pat`; PAT owner + `X-User-Id` override |
+
+Behaviour mirrors `kishibashi3-plugins-claude/.../agent-hub-plugin/skills/agent-hub/scripts/watch.sh`.
 
 ## License
 

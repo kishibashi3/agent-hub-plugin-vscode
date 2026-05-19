@@ -2,7 +2,7 @@
   "name": "agent-hub-bridge-vscode",
   "displayName": "agent-hub bridge (VS Code)",
   "description": "IDE-bound bridge that relays agent-hub DMs into the VS Code Language Model API (Copilot Chat) and posts replies back, with IDE context auto-attached.",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "publisher": "kishibashi3",
   "private": true,
   "license": "MIT",
