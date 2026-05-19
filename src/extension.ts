@@ -11,6 +11,7 @@ import {
   LOCALHOST_DEFAULT_URL,
   isDefaultLocalhostUrl,
 } from './agentHub';
+import { DEFAULT_IDE_CONTEXT_OPTIONS, type IdeContextOptions } from './ideContext';
 import { LmDispatcher, LmDispatcherConfig } from './lmDispatcher';
 
 const CHANNEL_NAME = 'agent-hub bridge';
@@ -66,7 +67,39 @@ function readDispatcherConfig(): LmDispatcherConfig {
         : DEFAULT_SYSTEM_PROMPT,
     modelSelector: selector,
     justification: DEFAULT_JUSTIFICATION,
+    ideContext: readIdeContextOptions(cfg),
   };
+}
+
+function readIdeContextOptions(
+  cfg: vscode.WorkspaceConfiguration
+): IdeContextOptions {
+  // Honour user overrides but always fall back to the documented defaults
+  // for unset / malformed values so a corrupt settings.json never silently
+  // disables context attach. Numeric keys are floored to non-negative.
+  const enabled = cfg.get<boolean>('ideContext.enabled');
+  const maxSelChars = cfg.get<number>('ideContext.maxSelectionChars');
+  const maxDiag = cfg.get<number>('ideContext.maxDiagnostics');
+  const windowLines = cfg.get<number>('ideContext.windowLinesAroundCursor');
+  return {
+    enabled: typeof enabled === 'boolean' ? enabled : DEFAULT_IDE_CONTEXT_OPTIONS.enabled,
+    maxSelectionChars: nonNegativeInt(
+      maxSelChars,
+      DEFAULT_IDE_CONTEXT_OPTIONS.maxSelectionChars
+    ),
+    maxDiagnostics: nonNegativeInt(maxDiag, DEFAULT_IDE_CONTEXT_OPTIONS.maxDiagnostics),
+    windowLinesAroundCursor: nonNegativeInt(
+      windowLines,
+      DEFAULT_IDE_CONTEXT_OPTIONS.windowLinesAroundCursor
+    ),
+  };
+}
+
+function nonNegativeInt(value: unknown, fallback: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    return fallback;
+  }
+  return Math.floor(value);
 }
 
 async function startWatcher(): Promise<void> {

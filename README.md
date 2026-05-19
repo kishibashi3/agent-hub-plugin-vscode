@@ -2,7 +2,7 @@
 
 IDE-bound bridge for [agent-hub](https://github.com/kishibashi3/agent-hub). Runs as a VS Code extension and relays DMs into the VS Code Language Model API (Copilot Chat), with IDE context (active editor, selection, diagnostics) auto-attached.
 
-> **Status:** scaffold + SSE inbox watch + LM bridging (issue [#1](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/1)). IDE-context auto-attach and `send_message` reply relay land in follow-up PRs.
+> **Status:** scaffold + SSE inbox watch + LM bridging + IDE-context auto-attach (issue [#1](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/1)). `send_message` reply relay lands in the next PR.
 
 ## Architecture
 
@@ -43,6 +43,10 @@ Available under `agentHubBridge.*`:
 | `agentHubBridge.systemPrompt` | (empty → built-in default) | Prepended to every DM forwarded to the LM. Empty falls back to a built-in prompt that frames the agent as an agent-hub participant. |
 | `agentHubBridge.languageModel.vendor` | `copilot` | Passed to `vscode.lm.selectChatModels`. |
 | `agentHubBridge.languageModel.family` | (empty) | Optional family filter (e.g. `gpt-4o`). Empty = no family constraint. |
+| `agentHubBridge.ideContext.enabled` | `true` | Auto-attach IDE context (active editor / selection / cursor-window / diagnostics) to forwarded DMs. Disable for headless behaviour. |
+| `agentHubBridge.ideContext.maxSelectionChars` | `4000` | Character cap on selection text; longer selections are truncated. |
+| `agentHubBridge.ideContext.maxDiagnostics` | `20` | Cap on diagnostics forwarded per dispatch (error-first ordering). `0` suppresses diagnostics. |
+| `agentHubBridge.ideContext.windowLinesAroundCursor` | `20` | Lines of surrounding code forwarded when there's no selection. `0` suppresses the cursor-window block. |
 
 ## Commands
 
@@ -53,8 +57,28 @@ Available under `agentHubBridge.*`:
 Each inbox notification triggers a serial drain:
 
 1. Fetch all unread messages via the `get_messages` MCP tool.
-2. For each message, build a prompt (system prompt + envelope + body), pick a chat model via `vscode.lm.selectChatModels`, and stream the response into the output channel.
+2. For each message, snapshot IDE context (active editor URI / selection or cursor-window text / diagnostics — see `agentHubBridge.ideContext.*`), build a prompt (system prompt + IDE block + envelope + body), pick a chat model via `vscode.lm.selectChatModels`, and stream the response into the output channel.
 3. On a non-empty LM response, ack the message via `mark_as_read`. On any failure — no model available, user denies LM consent, network error, etc. — the message is left unread so the next drain (or the next reconnect / consent grant / quota reset) retries it.
+
+The IDE context block looks roughly like:
+
+```
+## IDE context
+
+Active file: `file:///…/example.ts` (typescript)
+Cursor: line 42, column 8
+
+### Selection (lines 40-48)
+```ts
+…the selected text…
+```
+
+### Diagnostics (3 item(s))
+- line 41 error: [ts] Cannot find name 'foo'.
+- line 47 warning: Unused variable 'bar'.
+```
+
+When there's no selection, a configurable window of lines around the caret is included instead. When there's no active text editor (e.g. the user is on the output channel), the block is omitted entirely and a `[ide-context] no active text editor` line is logged.
 
 `send_message` reply relay back to the original sender arrives in the next PR (Step 5). Until then, responses are visible only in the bridge's output channel.
 

@@ -2,7 +2,7 @@
   "name": "agent-hub-bridge-vscode",
   "displayName": "agent-hub bridge (VS Code)",
   "description": "IDE-bound bridge that relays agent-hub DMs into the VS Code Language Model API (Copilot Chat) and posts replies back, with IDE context auto-attached.",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "publisher": "kishibashi3",
   "private": true,
   "license": "MIT",
@@ -75,6 +75,29 @@
           "type": "string",
           "default": "",
           "description": "Optional family filter for vscode.lm.selectChatModels (e.g. \"gpt-4o\"). Empty = no family constraint."
+        },
+        "agentHubBridge.ideContext.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Auto-attach IDE context (active editor URI, selection or cursor-window text, diagnostics) to every forwarded DM. Disable if you want the bridge to behave like a headless agent."
+        },
+        "agentHubBridge.ideContext.maxSelectionChars": {
+          "type": "number",
+          "default": 4000,
+          "minimum": 0,
+          "description": "Character cap on selection text forwarded to the LM. Longer selections are truncated with an ellipsis."
+        },
+        "agentHubBridge.ideContext.maxDiagnostics": {
+          "type": "number",
+          "default": 20,
+          "minimum": 0,
+          "description": "Cap on number of diagnostics (errors/warnings) forwarded per dispatch. Sorted error-first, then by line. Set to 0 to suppress diagnostics entirely."
+        },
+        "agentHubBridge.ideContext.windowLinesAroundCursor": {
+          "type": "number",
+          "default": 20,
+          "minimum": 0,
+          "description": "Lines of surrounding code to forward when there's no active selection. Set to 0 to suppress the cursor-window block."
         }
       }
     }
