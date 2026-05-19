@@ -16,7 +16,6 @@ import {
   RECONNECT_BACKOFF_MAX_MS,
   RECONNECT_BACKOFF_START_MS,
   resolveAuth,
-  resolvePatPrecedence,
   type BridgeConfig,
 } from '../src/protocol';
 
@@ -185,7 +184,7 @@ describe('resolveAuth', () => {
   it('throws when neither `user` nor `githubPat` is set', async () => {
     await assert.rejects(
       () => resolveAuth(baseCfg),
-      /set agentHubBridge\.githubPat .*or agentHubBridge\.user/
+      /run the `agent-hub bridge: Set GitHub PAT` command .*or .*set agentHubBridge\.user/
     );
   });
 
@@ -197,57 +196,8 @@ describe('resolveAuth', () => {
   });
 });
 
-describe('resolvePatPrecedence', () => {
-  it('prefers the secret value when both are set, flagging shadowed=true', () => {
-    const r = resolvePatPrecedence('ghp_secret', 'ghp_setting');
-    assert.equal(r.value, 'ghp_secret');
-    assert.equal(r.source, 'secret');
-    assert.equal(r.shadowed, true);
-  });
-
-  it('returns the setting value when only the setting is present, shadowed=false', () => {
-    const r = resolvePatPrecedence(undefined, 'ghp_setting');
-    assert.equal(r.value, 'ghp_setting');
-    assert.equal(r.source, 'setting');
-    assert.equal(r.shadowed, false);
-  });
-
-  it('returns the secret value when only the secret is present, shadowed=false', () => {
-    const r = resolvePatPrecedence('ghp_secret', undefined);
-    assert.equal(r.value, 'ghp_secret');
-    assert.equal(r.source, 'secret');
-    assert.equal(r.shadowed, false);
-  });
-
-  it('returns source=none with an empty value when both sources are undefined', () => {
-    const r = resolvePatPrecedence(undefined, undefined);
-    assert.equal(r.value, '');
-    assert.equal(r.source, 'none');
-    assert.equal(r.shadowed, false);
-  });
-
-  it('treats empty strings as absent (no source picked)', () => {
-    const r = resolvePatPrecedence('', '');
-    assert.equal(r.source, 'none');
-    assert.equal(r.value, '');
-  });
-
-  it('treats whitespace-only values as absent (no source picked)', () => {
-    const r = resolvePatPrecedence('   ', '\t\n');
-    assert.equal(r.source, 'none');
-    assert.equal(r.value, '');
-    assert.equal(r.shadowed, false);
-  });
-
-  it('trims surrounding whitespace from the chosen value', () => {
-    const r = resolvePatPrecedence(undefined, '  ghp_padded  ');
-    assert.equal(r.value, 'ghp_padded');
-    assert.equal(r.source, 'setting');
-  });
-
-  it('does not flag shadowed when the unchosen source is only whitespace', () => {
-    const r = resolvePatPrecedence('ghp_real', '   ');
-    assert.equal(r.source, 'secret');
-    assert.equal(r.shadowed, false);
-  });
-});
+// `resolvePatPrecedence` (and its `PatSource` type) were deleted in 0.4.0
+// when the legacy `agentHubBridge.githubPat` setting was removed (issue #15).
+// The 8 assertions that used to live here covered the dual-source decision
+// table; with only `SecretStorage` as a PAT source, no precedence logic
+// remains to test.
