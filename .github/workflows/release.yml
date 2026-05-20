@@ -43,6 +43,15 @@ jobs:
           cache: 'npm'
           cache-dependency-path: agent-hub-bridge-vscode/package-lock.json
 
+      # Install the SDK's own devDeps (typescript, @types/node) before
+      # bridge-vscode's `npm ci` triggers its `prepare` via
+      # install-links pack. Mirrors the CI workflow's identical step;
+      # without it `tsc -p tsconfig.json` fails resolving Node globals
+      # and `AsyncDisposable`.
+      - name: Install agent-hub-sdk devDeps (for its `prepare` script)
+        working-directory: agent-hub-sdk/js
+        run: npm install
+
       - name: Install dependencies
         working-directory: agent-hub-bridge-vscode
         run: npm ci

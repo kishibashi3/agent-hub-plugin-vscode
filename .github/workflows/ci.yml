@@ -47,6 +47,16 @@ jobs:
           cache: 'npm'
           cache-dependency-path: agent-hub-bridge-vscode/package-lock.json
 
+      # Install the SDK's *own* devDeps (typescript, @types/node) before
+      # bridge-vscode's `npm ci` triggers the SDK's `prepare` script
+      # (= `tsc -p tsconfig.json`) via npm's `install-links=true` pack
+      # step. Without this, prepare runs against an empty SDK node_modules/
+      # and fails with "Cannot find name 'console' / 'process' /
+      # 'AsyncDisposable'" — see #21 PR thread for the diagnosis trail.
+      - name: Install agent-hub-sdk devDeps (for its `prepare` script)
+        working-directory: agent-hub-sdk/js
+        run: npm install
+
       - name: Install dependencies
         working-directory: agent-hub-bridge-vscode
         run: npm ci
@@ -96,6 +106,14 @@ jobs:
           node-version: '22'
           cache: 'npm'
           cache-dependency-path: agent-hub-bridge-vscode/package-lock.json
+
+      # Same SDK-devDeps-first step as the build-and-test job — vsce
+      # packaging also re-runs the SDK's `prepare` via npm's
+      # install-links pack flow, so it needs typescript + @types/node
+      # available in `agent-hub-sdk/js/node_modules/` first.
+      - name: Install agent-hub-sdk devDeps (for its `prepare` script)
+        working-directory: agent-hub-sdk/js
+        run: npm install
 
       - name: Install dependencies
         working-directory: agent-hub-bridge-vscode
