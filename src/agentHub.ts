@@ -1,11 +1,18 @@
 // SSE inbox watcher (vscode-bound half).
 //
 // The vscode-free half — types, constants, pure helpers, and the
-// `AgentHubClient` MCP-tools wrapper — lives in `./protocol.ts` and is
+// `resolveAuth` 3-mode triage — lives in `./protocol.ts` and is
 // re-exported here so existing call sites (`import {…} from './agentHub'`)
 // keep working unchanged. This module's only original content is the
 // `InboxWatcher` class itself, which uses `vscode.EventEmitter` to fan
 // out `notifications/resources/updated` to subscribers.
+//
+// As of issue #21 the MCP-tools wrapper that used to live alongside
+// (`AgentHubClient`) has been retired in favour of the SDK's
+// `HubSession` (`@kishibashi3/agent-hub-sdk`) constructed via a thin
+// `McpClient` adapter (`./mcpClient`). The wire protocol is unchanged;
+// the SDK gives us typed `IncomingMessage` / `Participant` plus
+// `PeerNotFoundError` / `HubTransientError` classification for free.
 //
 // Original behaviour mirrors
 // `kishibashi3-plugins-claude/plugins/agent-hub-plugin/skills/agent-hub/scripts/watch.sh`:
@@ -22,7 +29,12 @@
 import * as vscode from 'vscode';
 
 import {
-  AgentHubClient,
+  HubSession,
+  type Config as SdkConfig,
+} from '@kishibashi3/agent-hub-sdk';
+
+import { createVscodeFetchMcpClient } from './mcpClient';
+import {
   type AuthContext,
   type BridgeConfig,
   isDefaultLocalhostUrl,
@@ -37,15 +49,16 @@ import {
 } from './protocol';
 
 // Re-exports for public surface compatibility — pre-split call sites
-// (`import { foo } from './agentHub'`) keep resolving.
+// (`import { foo } from './agentHub'`) keep resolving. The hand-rolled
+// `InboxMessage` bridge-local type is gone (issue #21): consumers
+// import `IncomingMessage` from `@kishibashi3/agent-hub-sdk` directly
+// (= `sender`/`body` field names match the SDK contract).
 export {
-  AgentHubClient,
   type AuthContext,
   type AuthMode,
   type BridgeConfig,
   extractJsonRpcResponse,
   extractTextContent,
-  type InboxMessage,
   type InboxMessageNotification,
   isDefaultLocalhostUrl,
   LOCALHOST_DEFAULT_URL,
@@ -68,8 +81,8 @@ type Logger = (msg: string) => void;
  *   - `start()` / `stop()` / `dispose()`
  *   - `state` snapshot for the status command
  *   - `onMessage` event for downstream consumers
- *   - `client` accessor that returns a fresh `AgentHubClient` bound to
- *     the *current* session (or `null` when not subscribed)
+ *   - `session` accessor that returns the SDK `HubSession` bound to
+ *     the *current* MCP session (or `null` when not subscribed)
  */
 export class InboxWatcher {
   private running = false;
@@ -77,6 +90,7 @@ export class InboxWatcher {
   private currentSessionId: string | null = null;
   private currentMode: WatcherMode = 'idle';
   private currentAuth: AuthContext | null = null;
+  private currentSession: HubSession | null = null;
   private readonly emitter = new vscode.EventEmitter<InboxMessageNotification>();
   readonly onMessage: vscode.Event<InboxMessageNotification> = this.emitter.event;
   private readonly loginResolver: LoginResolver | undefined;
@@ -103,15 +117,45 @@ export class InboxWatcher {
   }
 
   /**
-   * A short-lived `AgentHubClient` bound to the watcher's *current* session,
-   * or `null` when the watcher is idle / reconnecting / pre-subscribe. The
-   * caller should re-read this property on each operation so that a
-   * concurrent reconnect (which mints a fresh session id) is observed
-   * naturally rather than via a long-lived stale client.
+   * The SDK `HubSession` bound to the watcher's *current* MCP session,
+   * or `null` when the watcher is idle / reconnecting / pre-subscribe.
+   *
+   * Callers should re-read this property on each operation so that a
+   * concurrent reconnect (= which mints a fresh session id, discards
+   * the old `HubSession`, and binds a new one) is observed naturally
+   * rather than via a long-lived stale reference. The `HubSession`
+   * itself is just a typed facade around `MCP::tools/call`; the live
+   * `(url, auth, sessionId)` triple is captured inside the underlying
+   * `McpClient` closure (see `./mcpClient`).
    */
-  get client(): AgentHubClient | null {
-    if (!this.currentSessionId || !this.currentAuth) return null;
-    return new AgentHubClient(this.cfg.url, this.currentAuth, this.currentSessionId);
+  get session(): HubSession | null {
+    return this.currentSession;
+  }
+
+  /**
+   * Build the SDK `Config` for the *current* MCP session. Called on
+   * every successful subscribe (initial start + each reconnect) so the
+   * `HubSession` reflects fresh `(auth, sessionId)`.
+   *
+   * `pat` is set to the bridge's stored PAT when available — otherwise
+   * `''` so the (readonly, never-null) `Config.pat` field is satisfied
+   * without lying about the value. The factory's closure carries the
+   * actual `auth.headers` used at the HTTP layer, so this string is
+   * never read by `callTool`; it's only here for surface-level
+   * consistency with the SDK interface. `trust`-mode bridges therefore
+   * see `Config.pat === ''` if anyone introspects.
+   */
+  private bindSession(auth: AuthContext, sessionId: string): void {
+    const sdkConfig: SdkConfig = {
+      user: auth.userId,
+      displayName: null,
+      mode: 'stateful',
+      tenant: this.cfg.tenant || null,
+      url: this.cfg.url,
+      pat: this.cfg.githubPat ?? '',
+    };
+    const client = createVscodeFetchMcpClient(this.cfg.url, auth, sessionId);
+    this.currentSession = new HubSession(client, sdkConfig);
   }
 
   /**
@@ -171,6 +215,10 @@ export class InboxWatcher {
       await this.notifyInitialized(auth, sessionId);
       await this.subscribe(auth, sessionId);
       this.currentMode = 'subscribed';
+      // Bind a fresh `HubSession` to the just-subscribed `sessionId`.
+      // `LmDispatcher` reads `watcher.session` on every drain, so this
+      // takes effect immediately for the first batch of tool calls.
+      this.bindSession(auth, sessionId);
       this.log(
         `subscribed: inbox://@${auth.userId} (sessionId=${sessionId.slice(0, 8)}...) — waiting for pushes`
       );
@@ -180,6 +228,7 @@ export class InboxWatcher {
       this.currentMode = 'idle';
       this.currentSessionId = null;
       this.currentAuth = null;
+      this.currentSession = null;
       throw err;
     }
 
@@ -201,6 +250,7 @@ export class InboxWatcher {
     this.currentMode = 'idle';
     this.currentSessionId = null;
     this.currentAuth = null;
+    this.currentSession = null;
     this.log('stop: watcher halted');
   }
 
@@ -225,6 +275,11 @@ export class InboxWatcher {
           await this.notifyInitialized(auth, sessionId);
           await this.subscribe(auth, sessionId);
           this.currentMode = 'subscribed';
+          // Rebind the SDK `HubSession` to the freshly-minted MCP
+          // session id (= old session, with its captured closure, is
+          // discarded). `LmDispatcher` re-reads `watcher.session` per
+          // drain, so the next call lands on the new session.
+          this.bindSession(auth, sessionId);
           this.log(
             `subscribed: inbox://@${auth.userId} (sessionId=${sessionId.slice(0, 8)}..., re-established)`
           );
@@ -243,6 +298,11 @@ export class InboxWatcher {
         this.log(`[reconnect] ${msg} — retry in ${Math.round(backoffMs / 1000)}s`);
         this.currentMode = 'reconnecting';
         this.currentSessionId = null;
+        // Drop the stale `HubSession` while we're disconnected so any
+        // caller reading `watcher.session` during the backoff window
+        // gets `null` (= "skipping drain", logged by `LmDispatcher`)
+        // rather than firing tool calls against a dead session id.
+        this.currentSession = null;
         sessionId = null;
         await sleep(backoffMs);
         backoffMs = nextBackoffMs(backoffMs);
@@ -251,6 +311,7 @@ export class InboxWatcher {
     this.currentMode = 'idle';
     this.currentSessionId = null;
     this.currentAuth = null;
+    this.currentSession = null;
   }
 
   private async initialize(auth: AuthContext): Promise<string> {

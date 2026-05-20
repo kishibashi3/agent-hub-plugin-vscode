@@ -20,47 +20,80 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - name: Checkout
+      - name: Checkout bridge-vscode
         uses: actions/checkout@v4
+        with:
+          path: agent-hub-bridge-vscode
+
+      # The SDK is consumed via `file:../agent-hub-sdk/js` — clone it
+      # next to bridge-vscode so the relative path resolves the same
+      # way it does on a developer's machine. See `.npmrc`
+      # (`install-links=true`) for why this is a copy, not a symlink.
+      - name: Checkout agent-hub-sdk (sibling)
+        uses: actions/checkout@v4
+        with:
+          repository: kishibashi3/agent-hub-sdk
+          ref: main
+          path: agent-hub-sdk
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: 'npm'
+          cache-dependency-path: agent-hub-bridge-vscode/package-lock.json
+
+      # Install the SDK's own devDeps (typescript, @types/node) before
+      # bridge-vscode's `npm ci` triggers its `prepare` via
+      # install-links pack. Mirrors the CI workflow's identical step;
+      # without it `tsc -p tsconfig.json` fails resolving Node globals
+      # and `AsyncDisposable`.
+      - name: Install agent-hub-sdk devDeps (for its `prepare` script)
+        working-directory: agent-hub-sdk/js
+        run: npm install
 
       - name: Install dependencies
+        working-directory: agent-hub-bridge-vscode
         run: npm ci
 
       # Belt-and-braces: re-verify the working state before packaging so
       # we never tag against a non-green commit.
       - name: Typecheck
+        working-directory: agent-hub-bridge-vscode
         run: npm run typecheck
 
       - name: Lint
+        working-directory: agent-hub-bridge-vscode
         run: npm run lint
 
       - name: Compile
+        working-directory: agent-hub-bridge-vscode
         run: npm run compile
 
       - name: Test
+        working-directory: agent-hub-bridge-vscode
         run: npm test
 
       - name: Package
         # Output goes to the repo root by default
         # (`agent-hub-bridge-vscode-<version>.vsix`).
+        working-directory: agent-hub-bridge-vscode
         run: npm run package
 
       - name: Locate the produced .vsix
         id: vsix
+        working-directory: agent-hub-bridge-vscode
         run: |
           set -euo pipefail
           # vsce emits a single .vsix in the repo root; pick it up.
           vsix="$(ls -1 agent-hub-bridge-vscode-*.vsix | head -n1)"
-          echo "path=${vsix}" >> "$GITHUB_OUTPUT"
+          # Re-rooted to the workspace so the upload step can reference
+          # it without re-entering this working-directory.
+          echo "path=agent-hub-bridge-vscode/${vsix}" >> "$GITHUB_OUTPUT"
           echo "Built: ${vsix}"
 
       - name: Create GitHub Release
+        working-directory: agent-hub-bridge-vscode
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -85,17 +118,24 @@ jobs:
             changelog_body="No CHANGELOG entry found for ${tag}. See [CHANGELOG.md](./CHANGELOG.md)."
           fi
 
+          # The `steps.vsix.outputs.path` is workspace-rooted (e.g.
+          # `agent-hub-bridge-vscode/agent-hub-bridge-vscode-0.4.0.vsix`),
+          # but this step's working-directory is the bridge repo, so
+          # strip the prefix back off for `gh release upload`.
+          vsix_basename="${{ steps.vsix.outputs.path }}"
+          vsix_basename="${vsix_basename#agent-hub-bridge-vscode/}"
+
           # `gh release create` is idempotent only via --notes-file etc;
           # if the release exists (re-run), prefer to upload the asset
           # rather than fail.
           if gh release view "${tag}" >/dev/null 2>&1; then
             echo "Release ${tag} already exists — uploading asset only."
-            gh release upload "${tag}" "${{ steps.vsix.outputs.path }}" --clobber
+            gh release upload "${tag}" "${vsix_basename}" --clobber
           else
             echo "Creating release ${tag}…"
             printf '%s\n' "${changelog_body}" > /tmp/release-body.md
             gh release create "${tag}" \
-              "${{ steps.vsix.outputs.path }}" \
+              "${vsix_basename}" \
               --title "${tag}" \
               --notes-file /tmp/release-body.md
           fi

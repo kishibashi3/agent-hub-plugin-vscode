@@ -150,6 +150,9 @@
     "package:check": "vsce package --no-yarn --out /tmp/agent-hub-bridge-vscode-ci.vsix",
     "vscode:prepublish": "npm run compile"
   },
+  "dependencies": {
+    "@kishibashi3/agent-hub-sdk": "file:../agent-hub-sdk/js"
+  },
   "devDependencies": {
     "@types/node": "^22.10.5",
     "@types/vscode": "^1.95.0",

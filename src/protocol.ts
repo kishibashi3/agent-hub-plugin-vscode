@@ -1,14 +1,21 @@
 // Vscode-free MCP protocol layer.
 //
 // This module is the "pure" half of `./agentHub.ts` — all the types,
-// constants, helpers, and the `AgentHubClient` that talk to the
-// agent-hub server but never touch the VS Code extension host APIs.
+// constants, helpers, and the `resolveAuth` 3-mode triage that talk to
+// the agent-hub server but never touch the VS Code extension host APIs.
 //
 // Why a separate file: `agentHub.ts` imports `vscode` (for the
 // EventEmitter used by `InboxWatcher`), which means `require('./agentHub.js')`
 // from a plain Node test runner throws — there's no `vscode` module
 // outside the extension host. Splitting the pure pieces here lets
 // `node --test` exercise them directly with zero VS Code shims.
+//
+// As of issue #21 the MCP-tools wrapper (`AgentHubClient`) and the
+// bridge-local `InboxMessage` type have moved to the SDK:
+// `@kishibashi3/agent-hub-sdk` exposes `HubSession` + `IncomingMessage`.
+// The wire-level `extractJsonRpcResponse` / `extractTextContent`
+// helpers stay here because the bridge-vscode `McpClient` adapter
+// (`./mcpClient`) still uses them at the raw-fetch layer.
 //
 // Public surface compatibility: `./agentHub.ts` re-exports everything
 // from this module so existing call sites (`import { foo } from
@@ -46,17 +53,10 @@ export interface WatcherState {
   readonly userId: string | null;
 }
 
-/**
- * Shape of an unread inbox message as returned by the agent-hub server's
- * `get_messages` tool. Mirrors `agent-hub/src/mcp/tools/get_messages.ts`.
- */
-export interface InboxMessage {
-  readonly id: string;
-  readonly from: string;
-  readonly to: string;
-  readonly message: string;
-  readonly timestamp: string;
-}
+// The bridge-local `InboxMessage` interface was retired in issue #21.
+// Consumers now import `IncomingMessage` from
+// `@kishibashi3/agent-hub-sdk` directly; field names changed from
+// `from`/`message` to `sender`/`body` to match the SDK contract.
 
 /**
  * The package.json default for `agentHubBridge.url`. Kept here so the
@@ -160,119 +160,23 @@ export async function fetchGitHubLogin(pat: string): Promise<string | null> {
   }
 }
 
-/**
- * Thin MCP-tools client bound to a live session. Used by `LmDispatcher` to
- * fetch message bodies (`get_messages`), post replies (`send_message`), and
- * ack messages (`mark_as_read`) after a successful LM dispatch.
- *
- * Stateless apart from `nextId` — `InboxWatcher` constructs a fresh one per
- * call via `watcher.client`, so a session invalidation (e.g. server
- * restart) is naturally observed: the next tool call comes back with an
- * error and the dispatcher leaves the message unread for the watcher to
- * re-pick up after reconnect.
- */
-export class AgentHubClient {
-  private nextId = 100; // initialize/subscribe use ids 0/1 — stay clear of those.
-
-  constructor(
-    private readonly url: string,
-    private readonly auth: AuthContext,
-    private readonly sessionId: string
-  ) {}
-
-  /** Generic `tools/call` over the streamable HTTP transport. */
-  async callTool(
-    name: string,
-    args: Record<string, unknown>,
-    timeoutMs = 30_000
-  ): Promise<unknown> {
-    const id = this.nextId++;
-    const res = await fetch(this.url, {
-      method: 'POST',
-      headers: {
-        ...this.auth.headers,
-        'mcp-session-id': this.sessionId,
-        'Content-Type': 'application/json',
-        Accept: 'application/json, text/event-stream',
-      },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        method: 'tools/call',
-        params: { name, arguments: args },
-        id,
-      }),
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-    if (!res.ok) {
-      throw new Error(`tools/call ${name}: HTTP ${res.status}`);
-    }
-    const body = await res.text();
-    const response = extractJsonRpcResponse(body, id);
-    if (!response) {
-      throw new Error(`tools/call ${name}: no matching response in body`);
-    }
-    if (response.error) {
-      const err = response.error;
-      // `err` is `unknown`. JSON.stringify is the safe stringifier for
-      // both primitive and structured error payloads — primitives stringify
-      // as their literal, objects stringify as JSON, undefined → "null".
-      // `String(obj)` would yield "[object Object]" for the object case.
-      throw new Error(`tools/call ${name}: ${JSON.stringify(err)}`);
-    }
-    return response.result;
-  }
-
-  /** Fetches the caller's unread inbox (DMs + team mail, sender-excluded). */
-  async getMessages(): Promise<InboxMessage[]> {
-    const result = await this.callTool('get_messages', {});
-    const text = extractTextContent(result);
-    const parsed: unknown = JSON.parse(text);
-    if (!Array.isArray(parsed)) {
-      throw new Error('get_messages: expected an array, got something else');
-    }
-    const out: InboxMessage[] = [];
-    for (const item of parsed) {
-      if (isInboxMessage(item)) {
-        out.push(item);
-      }
-    }
-    return out;
-  }
-
-  /**
-   * Sends a DM (or team-broadcast, when `to` is a `@team-name`) via the
-   * `send_message` MCP tool. The Step 5 reply path uses this to relay
-   * the LM response back to the original sender.
-   */
-  async sendMessage(to: string, message: string): Promise<void> {
-    const result = await this.callTool('send_message', { to, message });
-    const r = result as { isError?: boolean; content?: Array<{ type?: unknown; text?: unknown }> };
-    if (r.isError) {
-      const first = Array.isArray(r.content) ? r.content[0] : undefined;
-      const text = typeof first?.text === 'string' ? first.text : '(no detail)';
-      throw new Error(`send_message: ${text}`);
-    }
-  }
-
-  /**
-   * Marks one message as read. Idempotent server-side, but the handler
-   * returns `isError: true` when the message id is unknown or not owned
-   * by the caller — we surface that as a thrown error so the caller can
-   * decide whether to retry.
-   */
-  async markAsRead(messageId: string): Promise<void> {
-    const result = await this.callTool('mark_as_read', { message_id: messageId });
-    const r = result as { isError?: boolean; content?: Array<{ type?: unknown; text?: unknown }> };
-    if (r.isError) {
-      // Narrow via a local + optional chain instead of a non-null
-      // assertion — the whole point of `noUncheckedIndexedAccess`
-      // (added in PR #2) is to prevent `arr[0]!` bypasses.
-      const first = Array.isArray(r.content) ? r.content[0] : undefined;
-      const text = typeof first?.text === 'string' ? first.text : '(no detail)';
-      throw new Error(`mark_as_read: ${text}`);
-    }
-  }
-}
+// `AgentHubClient` was retired in issue #21 (= bridge-vscode SDK
+// migration, L1 dogfood). It used to live here as a thin MCP-tools
+// wrapper bound to a `(url, auth, sessionId)` triple, exposing
+// `callTool` / `getMessages` / `sendMessage` / `markAsRead`. Its role
+// has been split:
+//
+//   - The `tools/call` wire layer lives in `./mcpClient.ts` as a
+//     `McpClient` adapter that conforms to the SDK's interface.
+//   - The typed surface (`getMessages` / `sendMessage` / `markAsRead`)
+//     comes from `HubSession.getUnread` / `send` / `ack` in
+//     `@kishibashi3/agent-hub-sdk`, with `PeerNotFoundError` /
+//     `HubTransientError` classification for free.
+//
+// `extractJsonRpcResponse` and `extractTextContent` below stay here
+// because the new `./mcpClient` adapter still needs them at the raw
+// fetch + JSON-RPC framing layer (the SDK doesn't see the wire format
+// — only the parsed `CallToolResult` shape).
 
 /**
  * Pulls the JSON-RPC response with the matching `id` out of a POST body
@@ -332,14 +236,6 @@ export function extractTextContent(result: unknown): string {
   return first.text;
 }
 
-function isInboxMessage(value: unknown): value is InboxMessage {
-  if (!value || typeof value !== 'object') return false;
-  const v = value as Record<string, unknown>;
-  return (
-    typeof v.id === 'string' &&
-    typeof v.from === 'string' &&
-    typeof v.to === 'string' &&
-    typeof v.message === 'string' &&
-    typeof v.timestamp === 'string'
-  );
-}
+// `isInboxMessage` was retired alongside `InboxMessage` in issue #21
+// — the SDK's `parseMessages` (used internally by `HubSession.getUnread`)
+// is the new home for the schema-drift defence.
