@@ -19,7 +19,12 @@
 
 import * as vscode from 'vscode';
 
-import type { AgentHubClient, InboxMessage, InboxMessageNotification, InboxWatcher } from './agentHub';
+import type {
+  HubSession,
+  IncomingMessage,
+} from '@kishibashi3/agent-hub-sdk';
+
+import type { InboxMessageNotification, InboxWatcher } from './agentHub';
 import {
   collectIdeContext,
   EMPTY_IDE_CONTEXT_SNAPSHOT,
@@ -137,14 +142,14 @@ export class LmDispatcher {
   }
 
   private async drainOnce(): Promise<void> {
-    const client = this.requireClient();
-    if (!client) {
+    const session = this.requireSession();
+    if (!session) {
       this.deps.log('[drain] watcher not currently subscribed — skipping');
       return;
     }
-    let messages: InboxMessage[];
+    let messages: IncomingMessage[];
     try {
-      messages = await client.getMessages();
+      messages = await session.getUnread();
     } catch (err) {
       this.deps.log(`[ERR] get_messages: ${errMsg(err)}`);
       return;
@@ -157,9 +162,9 @@ export class LmDispatcher {
     }
   }
 
-  private async dispatchOne(msg: InboxMessage): Promise<void> {
+  private async dispatchOne(msg: IncomingMessage): Promise<void> {
     this.deps.log(
-      `[dispatch] from=${msg.from} id=${msg.id}: ${truncate(msg.message, 80)}`
+      `[dispatch] from=${msg.sender} id=${msg.id}: ${truncate(msg.body, 80)}`
     );
 
     const model = await this.pickModel();
@@ -241,8 +246,8 @@ export class LmDispatcher {
     // The full response text is still logged to the output channel as a
     // `[reply-sent]` breadcrumb so an operator can audit what got
     // forwarded without correlating with the agent-hub server logs.
-    const replyClient = this.requireClient();
-    if (!replyClient) {
+    const replySession = this.requireSession();
+    if (!replySession) {
       this.deps.log(
         `[WARN] watcher lost session before reply for msg=${msg.id} — ` +
           'message will be redelivered on the next drain'
@@ -250,16 +255,16 @@ export class LmDispatcher {
       return;
     }
     try {
-      await replyClient.sendMessage(msg.from, responseText);
+      await replySession.send(msg.sender, responseText);
     } catch (err) {
       this.deps.log(
-        `[ERR] send_message to=${msg.from} msg=${msg.id}: ${errMsg(err)} — ` +
+        `[ERR] send_message to=${msg.sender} msg=${msg.id}: ${errMsg(err)} — ` +
           'leaving message unread for retry'
       );
       return;
     }
     this.deps.log(
-      `[reply-sent] to=${msg.from} model=${model.id} msg=${msg.id} ` +
+      `[reply-sent] to=${msg.sender} model=${model.id} msg=${msg.id} ` +
         `chars=${responseText.length}\n` +
         `--- begin reply ---\n${responseText}\n--- end reply ---`
     );
@@ -267,8 +272,14 @@ export class LmDispatcher {
     await this.markRead(msg);
   }
 
-  private requireClient(): AgentHubClient | null {
-    return this.deps.watcher.client;
+  /**
+   * The SDK `HubSession` for the watcher's *current* MCP session, or
+   * `null` when reconnecting / idle. Re-read per call so the dispatcher
+   * naturally follows the watcher across reconnects (= old session
+   * discarded, new one bound after re-subscribe).
+   */
+  private requireSession(): HubSession | null {
+    return this.deps.watcher.session;
   }
 
   private async pickModel(): Promise<vscode.LanguageModelChat | undefined> {
@@ -296,7 +307,7 @@ export class LmDispatcher {
   private async runChat(
     model: vscode.LanguageModelChat,
     chatMessages: vscode.LanguageModelChatMessage[],
-    msg: InboxMessage
+    msg: IncomingMessage
   ): Promise<string | undefined> {
     try {
       const response = await model.sendRequest(
@@ -324,9 +335,9 @@ export class LmDispatcher {
     }
   }
 
-  private async markRead(msg: InboxMessage): Promise<void> {
-    const client = this.requireClient();
-    if (!client) {
+  private async markRead(msg: IncomingMessage): Promise<void> {
+    const session = this.requireSession();
+    if (!session) {
       this.deps.log(
         `[WARN] watcher lost session before mark_as_read msg=${msg.id} — ` +
           'message will be redelivered on the next drain'
@@ -334,7 +345,7 @@ export class LmDispatcher {
       return;
     }
     try {
-      await client.markAsRead(msg.id);
+      await session.ack(msg.id);
       this.deps.log(`[ack] mark_as_read msg=${msg.id}`);
     } catch (err) {
       this.deps.log(

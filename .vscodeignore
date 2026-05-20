@@ -29,9 +29,18 @@ eslint.config.mjs
 !out/**/*.d.ts
 
 # Lockfile + manifests — `package.json` is needed by vsce / VS Code, the
-# lockfile and node_modules are not part of the runtime extension surface.
+# lockfile is dev-only. node_modules is excluded by default, but we
+# re-include the SDK so the runtime `require('@kishibashi3/agent-hub-sdk')`
+# inside the .vsix resolves. npm `install-links=true` (see `.npmrc`)
+# ensures `node_modules/@kishibashi3/agent-hub-sdk/` is a real copy of
+# the SDK's `files: []` ship surface (= `dist/` + `src/` + manifests)
+# rather than a symlink to a sibling checkout, so the include below
+# only catches the SDK's own published artefacts — no nested
+# devDependencies follow along.
 package-lock.json
 node_modules/
+!node_modules/@kishibashi3/
+!node_modules/@kishibashi3/agent-hub-sdk/**
 
 # Docs we don't ship (PR templates, ADRs, internal notes if any later)
 docs/

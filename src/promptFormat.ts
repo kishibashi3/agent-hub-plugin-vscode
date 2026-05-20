@@ -11,7 +11,7 @@
 // Public surface compatibility: `./lmDispatcher.ts` and `./ideContext.ts`
 // re-export the relevant pieces so existing call sites keep working.
 
-import type { InboxMessage } from './protocol';
+import type { IncomingMessage } from '@kishibashi3/agent-hub-sdk';
 
 export interface IdeMultiEditorOptions {
   /**
@@ -404,7 +404,7 @@ export function formatIdeContext(snapshot: IdeContextSnapshot): string {
  */
 export function formatPrompt(
   systemPrompt: string,
-  msg: InboxMessage,
+  msg: IncomingMessage,
   ideContext: string
 ): string {
   const preamble = systemPrompt.trim();
@@ -412,9 +412,9 @@ export function formatPrompt(
   const idePart = ideContext.length > 0 ? `${ideContext}\n\n---\n\n` : '';
   return (
     `${head}${idePart}You have received a direct message via agent-hub.\n\n` +
-    `From: ${msg.from}\n` +
+    `From: ${msg.sender}\n` +
     `Message id: ${msg.id}\n` +
     `Sent at: ${msg.timestamp}\n\n` +
-    `Content:\n${msg.message}`
+    `Content:\n${msg.body}`
   );
 }

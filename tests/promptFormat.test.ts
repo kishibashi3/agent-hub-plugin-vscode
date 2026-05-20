@@ -17,13 +17,13 @@ import {
   type IdeGitDiff,
   type IdeSecondaryEditor,
 } from '../src/promptFormat';
-import type { InboxMessage } from '../src/protocol';
+import type { IncomingMessage } from '@kishibashi3/agent-hub-sdk';
 
-const sampleMessage: InboxMessage = {
+const sampleMessage: IncomingMessage = {
   id: '00000000-0000-4000-8000-000000000001',
-  from: '@alice',
+  sender: '@alice',
   to: '@bridge-vscode-impl',
-  message: 'Please look at this test failure.',
+  body: 'Please look at this test failure.',
   timestamp: '2026-05-19T03:00:00Z',
 };
 
@@ -159,7 +159,7 @@ describe('formatPrompt', () => {
   });
 
   it('preserves the message envelope when message body is multi-line', () => {
-    const msg: InboxMessage = { ...sampleMessage, message: 'line1\nline2\nline3' };
+    const msg: IncomingMessage = { ...sampleMessage, body: 'line1\nline2\nline3' };
     const out = formatPrompt('', msg, '');
     assert.match(out, /Content:\nline1\nline2\nline3$/);
   });
