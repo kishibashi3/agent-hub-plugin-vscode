@@ -1,5 +1,5 @@
 // Inbox notification sink — replaces the full LM-dispatch pipeline removed
-// in issue #36. Autonomous LM dispatch (inbox → LM → send_message) is gone;
+// in issue #35. Autonomous LM dispatch (inbox → LM → send_message) is gone;
 // inbound DMs are now shown as VS Code notifications and ack'd.
 //
 // Pipeline per inbound notification:

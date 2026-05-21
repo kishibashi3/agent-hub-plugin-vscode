@@ -12,9 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **Remove LM auto-dispatch ([#35](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/35))** — the inbox → LM → auto-reply pipeline has been removed. Inbound DMs are now surfaced as VS Code `showInformationMessage` notifications and logged to the output channel; the bridge no longer generates autonomous replies. Outbound DMs continue to work unchanged via the `@agent-hub` Copilot Chat participant.
+- `src/lmDispatcher.ts` — LM invocation, model selection, IDE-context collection, and prompt formatting logic removed. The file now contains only the drain-loop skeleton (`requestDrain` / `drainLoop` / `drainOnce`) plus the new `notifyOne` sink.
 
 ### Removed
-- `src/lmDispatcher.ts` — LM invocation, model selection, IDE-context collection, and prompt formatting logic. The file now contains only the drain-loop skeleton (`requestDrain` / `drainLoop` / `drainOnce`) plus the new `notifyOne` sink.
 - `src/ideContext.ts` — IDE-context capture (active editor, selection, cursor-window, diagnostics, git diff, multi-editor, notebook). No longer needed.
 - `src/promptFormat.ts` — `formatPrompt` / `formatIdeContext` / `formatGitDiffBlock` and related helpers. No longer needed.
 - `src/vscodeGit.d.ts` — local typings for the `vscode.git` extension API. No longer needed.
