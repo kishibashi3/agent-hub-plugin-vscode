@@ -108,3 +108,49 @@ describe('parseHandle', () => {
     assert.equal(parseHandle('hello @planner'), null);
   });
 });
+
+import { PICKER_TRIGGER, extractPickerBody, isPickerTrigger } from '../src/chatParticipantCore';
+
+describe('isPickerTrigger', () => {
+  it('returns true for bare @@', () => {
+    assert.equal(isPickerTrigger('@@'), true);
+  });
+
+  it('returns true for @@ with a body', () => {
+    assert.equal(isPickerTrigger('@@ hello'), true);
+  });
+
+  it('returns true when surrounded by whitespace', () => {
+    assert.equal(isPickerTrigger('  @@  '), true);
+  });
+
+  it('returns false for a normal @handle', () => {
+    assert.equal(isPickerTrigger('@planner'), false);
+  });
+
+  it('returns false for a normal @handle with body', () => {
+    assert.equal(isPickerTrigger('@planner hello'), false);
+  });
+
+  it('returns false for empty string', () => {
+    assert.equal(isPickerTrigger(''), false);
+  });
+
+  it('PICKER_TRIGGER constant equals "@@"', () => {
+    assert.equal(PICKER_TRIGGER, '@@');
+  });
+});
+
+describe('extractPickerBody', () => {
+  it('returns empty string for bare @@', () => {
+    assert.equal(extractPickerBody('@@'), '');
+  });
+
+  it('returns the body after @@', () => {
+    assert.equal(extractPickerBody('@@ hello world'), 'hello world');
+  });
+
+  it('trims the extracted body', () => {
+    assert.equal(extractPickerBody('@@   hello   '), 'hello');
+  });
+});

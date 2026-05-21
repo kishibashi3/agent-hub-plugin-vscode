@@ -32,6 +32,13 @@ let dispatcher: LmDispatcher | undefined;
 // Lifetime: same as the extension; dispose() cancels all pending waiters.
 const relayTracker = new RelayTracker();
 
+// Shared sticky-handle ref (issue #50). Mutated by:
+//   • chatParticipant — on successful send (remembers who we sent to)
+//   • LmDispatcher    — on every received DM (remembers who just replied)
+// Both paths write the same field so the Chat participant always resolves
+// bare `@agent-hub` messages to the most-recently-active peer.
+const stickyHandle: { value: string | undefined } = { value: undefined };
+
 function log(msg: string): void {
   const ts = new Date().toISOString();
   outputChannel?.appendLine(`[${ts}] ${msg}`);
@@ -89,7 +96,7 @@ async function startWatcher(context: vscode.ExtensionContext): Promise<void> {
   }
 
   const w = new InboxWatcher(config, log);
-  const d = new LmDispatcher({ watcher: w, log, relayTracker });
+  const d = new LmDispatcher({ watcher: w, log, relayTracker, stickyHandle });
   // Subscribe before start() so we never miss the first event the watcher
   // emits after subscribe returns. The dispatcher's onInboxNotification
   // requestDrain()s, which then fetches *all* unread messages — so even if
@@ -279,15 +286,17 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   );
 
-  // Register the @agent-hub Copilot Chat participant (issue #28, #45).
-  // relayTracker is shared with LmDispatcher so replies from DM targets
-  // appear in the Chat panel instead of as VS Code notifications.
+  // Register the @agent-hub Copilot Chat participant (issue #28, #45, #50).
+  // relayTracker is shared with LmDispatcher so replies appear in the Chat
+  // panel. stickyHandle is shared so both send and receive paths keep the
+  // "last active peer" in sync.
   registerChatParticipant(
     context,
     () => watcher,
     () => startWatcher(context),
     log,
-    relayTracker
+    relayTracker,
+    stickyHandle
   );
 }
 

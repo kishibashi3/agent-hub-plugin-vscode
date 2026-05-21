@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-05-22
+
+### Added
+- **Default handle setting + sticky reply mode ([#50](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/50))** — recipient resolution priority is now: explicit `@handle` → sticky handle → `agentHubBridge.defaultHandle` setting → usage message.
+- **`@@` participant picker trigger** — type `@agent-hub @@` to open the QuickPick participant list. Using `@@` avoids VS Code's own `@` participant selector intercepting the input. Optionally pre-fill the body: `@agent-hub @@ hello`.
+- `agentHubBridge.defaultHandle` configuration key — set a default DM recipient; bare `@agent-hub` resolves silently without the picker.
+- Sticky handle now also updates on every received DM (not just on send).
+- `isPickerTrigger` / `extractPickerBody` / `PICKER_TRIGGER` helpers in `src/chatParticipantCore.ts` (vscode-free, unit tested).
+- 10 new unit tests for `isPickerTrigger` and `extractPickerBody`.
+
+### Changed
+- `src/lmDispatcher.ts` — `LmDispatcherDeps` gains `stickyHandle?: { value: string | undefined }`; `notifyOne()` writes `msg.sender` to it before relay/notification dispatch.
+- `src/chatParticipant.ts` — `registerChatParticipant` gains a `stickyHandle` parameter. Handler dispatch order: `@@` picker trigger → explicit `@handle` → sticky → defaultHandle → usage. QuickPick no longer appears on bare `@agent-hub`.
+- `src/extension.ts` — module-level `stickyHandle` ref threaded into both `LmDispatcher` and `registerChatParticipant`.
+
 ## [0.10.0] — 2026-05-22
 
 ### Added
