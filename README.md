@@ -98,10 +98,10 @@ Available under `agentHubBridge.*`:
 
 Each inbox notification triggers a serial drain:
 
-1. Fetch all unread messages via the `get_messages` MCP tool.
+1. Fetch all unread messages via `session.getUnread()` (wraps the `get_messages` MCP tool).
 2. For each message, snapshot IDE context (active editor URI / selection or cursor-window text / diagnostics — see `agentHubBridge.ideContext.*`), build a prompt (system prompt + IDE block + envelope + body), pick a chat model via `vscode.lm.selectChatModels`, and stream the response.
-3. **Reply relay**: on a non-empty LM response, call `send_message` to DM the response back to the original sender. The full response is also logged as a `[reply-sent]` breadcrumb in the output channel for audit / debug.
-4. **Ack only after a successful reply**: `mark_as_read` runs only when the relay succeeds. Any failure — no model available, LM consent denied, network error, relay error, `mark_as_read` error, watcher reconnecting mid-pipeline — leaves the message unread so the next drain retries it.
+3. **Reply relay**: on a non-empty LM response, call `session.send()` to DM the response back to the original sender. The full response is also logged as a `[reply-sent]` breadcrumb in the output channel for audit / debug.
+4. **Ack only after a successful reply**: `session.ack()` runs only when the relay succeeds. Any failure — no model available, LM consent denied, network error, relay error, `ack` error, watcher reconnecting mid-pipeline — leaves the message unread so the next drain retries it.
 
 The IDE context block looks roughly like:
 
