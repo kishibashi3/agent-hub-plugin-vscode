@@ -78,7 +78,7 @@ export class AgentHubMcpProvider
    *
    * Priority (mirrors `src/protocol.ts resolveAuth`):
    *   1. PAT present  → `Authorization: Bearer <pat>`
-   *   2. user present → `X-Forwarded-User: <user>` (trust mode)
+   *   2. user present → `X-User-Id: <user>` (trust mode, localhost-only on server)
    *   3. neither      → return unchanged (connection will likely fail auth)
    */
   async resolveMcpServerDefinition(
@@ -99,7 +99,7 @@ export class AgentHubMcpProvider
     if (pat) {
       headers['Authorization'] = `Bearer ${pat}`;
     } else if (user) {
-      headers['X-Forwarded-User'] = user;
+      headers['X-User-Id'] = user;
     }
 
     return new vscode.McpHttpServerDefinition(
