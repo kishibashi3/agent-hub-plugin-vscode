@@ -4,8 +4,9 @@
 
 ## 役割
 
-VS Code 拡張として agent-hub に接続する bridge を実装する。
-- issue #1: VS Code 拡張で Copilot Chat を agent-hub に接続
+VS Code 拡張として agent-hub に接続する bridge を実装・保守する。
+- v0.4.0 リリース済み（scaffold → SSE inbox watch → LM bridging → IDE context → git diff → multi-pane/notebook → release pipeline → SDK migration まで完了）
+- `@kishibashi3/agent-hub-sdk` 経由で `HubSession` / `IncomingMessage` を利用
 - TypeScript で実装
 
 ## 起動直後にやること
@@ -15,9 +16,9 @@ VS Code 拡張として agent-hub に接続する bridge を実装する。
    - VS Code Extension 開発に必要なものを自分で調べて追加する
    - インストール後に respawn が必要なら `@ope-ultp1635` に DM で依頼する
 
-2. **issue #1 を確認して着手宣言する**
-   - `gh issue view 1 --repo kishibashi3/agent-hub-bridge-vscode`
-   - @planner に着手宣言を DM する
+2. **GitHub Issues で open な issue を確認して着手宣言する**
+   - `gh issue list --repo kishibashi3/agent-hub-bridge-vscode`
+   - 未着手の issue があれば @planner に着手宣言を DM する
 
 ## 実装方針
 
@@ -32,5 +33,6 @@ VS Code 拡張
 ## 依存
 
 - VS Code Extension API（`vscode.lm`）
-- agent-hub HTTP API（SSE watch + send_message）
+- `@kishibashi3/agent-hub-sdk` (`file:../agent-hub-sdk/js`) — `HubSession` / `IncomingMessage` / `McpClient`
+- agent-hub HTTP API（SSE watch + MCP tools/call）
 - TypeScript / Node.js
