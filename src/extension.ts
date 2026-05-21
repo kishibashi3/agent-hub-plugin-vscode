@@ -17,6 +17,7 @@ import {
 import { registerChatParticipant } from './chatParticipant';
 import { LmDispatcher } from './lmDispatcher';
 import { RelayTracker } from './relayTracker';
+import type { StickyHandleRef } from './stickyHandle';
 import { fetchGitHubLogin } from './protocol';
 
 const SECRET_KEY_GITHUB_PAT = 'agentHubBridge.githubPat';
@@ -37,7 +38,7 @@ const relayTracker = new RelayTracker();
 //   • LmDispatcher    — on every received DM (remembers who just replied)
 // Both paths write the same field so the Chat participant always resolves
 // bare `@agent-hub` messages to the most-recently-active peer.
-const stickyHandle: { value: string | undefined } = { value: undefined };
+const stickyHandle: StickyHandleRef = { value: undefined };
 
 function log(msg: string): void {
   const ts = new Date().toISOString();

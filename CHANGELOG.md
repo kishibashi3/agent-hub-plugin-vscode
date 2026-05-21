@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.1] — 2026-05-22
+
+### Changed
+- **Extract sticky-handle update to vscode-free helper ([#52](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/52) / [#54](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/54))** — `stickyHandle.value = msg.sender` in `lmDispatcher.ts` is now delegated to `updateStickyHandle()` in the new `src/stickyHandle.ts` module, enabling unit testing without a VS Code shim. Returns `true`/`false` to suppress redundant log entries.
+- `src/extension.ts` — `stickyHandle` typed as `StickyHandleRef` (imported from `./stickyHandle`).
+- `eslint.config.mjs` — `src/stickyHandle.ts` added to the vscode-free `no-restricted-imports` rule.
+
+### Added
+- `src/stickyHandle.ts` — vscode-free `StickyHandleRef` interface and `updateStickyHandle(ref, sender)` helper.
+- `tests/stickyHandle.test.ts` — 5 unit tests for `updateStickyHandle`.
+
 ## [0.11.0] — 2026-05-22
 
 ### Added
