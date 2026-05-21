@@ -57,3 +57,35 @@ export function parseHandle(prompt: string): { handle: string; body: string } | 
     body: (match[2] ?? '').trim(),
   };
 }
+
+/**
+ * The literal trigger string the user types to open the participant picker.
+ *
+ * Typing `@agent-hub @@` (where VS Code strips the `@agent-hub` prefix) causes
+ * `request.prompt` to equal `"@@"`. Using a two-`@` prefix avoids interference
+ * with VS Code's own `@` participant selector (issue #50).
+ */
+export const PICKER_TRIGGER = '@@';
+
+/**
+ * Returns `true` when the prompt is the `@@` participant-picker trigger.
+ *
+ * Matches both the bare trigger (`@@`) and a trigger with an optional pre-filled
+ * body (`@@ <body>`), allowing `@agent-hub @@ hello` to open the picker with
+ * the body "hello" already set.
+ *
+ * Checked before `parsePrompt` / `parseHandle` so `@@` is never mistaken for
+ * a real `@`-handle.
+ */
+export function isPickerTrigger(prompt: string): boolean {
+  const t = prompt.trim();
+  return t === PICKER_TRIGGER || t.startsWith(PICKER_TRIGGER + ' ');
+}
+
+/**
+ * Extract the body text that follows the `@@` trigger, if any.
+ * Returns an empty string when no body is present.
+ */
+export function extractPickerBody(prompt: string): string {
+  return prompt.trim().slice(PICKER_TRIGGER.length).trim();
+}
