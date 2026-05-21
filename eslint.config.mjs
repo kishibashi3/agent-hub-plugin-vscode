@@ -78,7 +78,7 @@ export default tseslint.config(
   //    `chatParticipantCore.ts` are pure Node modules (no vscode import).
   //    This rule keeps the pure side pure as a lint-enforced invariant.
   {
-    files: ['src/protocol.ts', 'src/chatParticipantCore.ts'],
+    files: ['src/protocol.ts', 'src/chatParticipantCore.ts', 'src/relayTracker.ts'],
     rules: {
       'no-restricted-imports': [
         'error',
@@ -87,7 +87,7 @@ export default tseslint.config(
             {
               name: 'vscode',
               message:
-                'protocol.ts and chatParticipantCore.ts must remain vscode-free (PR #8 split). ' +
+                'protocol.ts, chatParticipantCore.ts, and relayTracker.ts must remain vscode-free (PR #8 split). ' +
                 'Move vscode-dependent code into the vscode-bound layer (agentHub.ts / ' +
                 'lmDispatcher.ts / chatParticipant.ts / extension.ts).',
             },

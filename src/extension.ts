@@ -16,6 +16,7 @@ import {
 } from './agentHub';
 import { registerChatParticipant } from './chatParticipant';
 import { LmDispatcher } from './lmDispatcher';
+import { RelayTracker } from './relayTracker';
 import { fetchGitHubLogin } from './protocol';
 
 const SECRET_KEY_GITHUB_PAT = 'agentHubBridge.githubPat';
@@ -26,6 +27,10 @@ let outputChannel: vscode.OutputChannel | undefined;
 let watcher: InboxWatcher | undefined;
 let watcherDisposable: vscode.Disposable | undefined;
 let dispatcher: LmDispatcher | undefined;
+// Single shared RelayTracker — wired into both LmDispatcher (intercepts
+// replies) and registerChatParticipant (registers waiters on send).
+// Lifetime: same as the extension; dispose() cancels all pending waiters.
+const relayTracker = new RelayTracker();
 
 function log(msg: string): void {
   const ts = new Date().toISOString();
@@ -84,7 +89,7 @@ async function startWatcher(context: vscode.ExtensionContext): Promise<void> {
   }
 
   const w = new InboxWatcher(config, log);
-  const d = new LmDispatcher({ watcher: w, log });
+  const d = new LmDispatcher({ watcher: w, log, relayTracker });
   // Subscribe before start() so we never miss the first event the watcher
   // emits after subscribe returns. The dispatcher's onInboxNotification
   // requestDrain()s, which then fetches *all* unread messages — so even if
@@ -269,16 +274,20 @@ export function activate(context: vscode.ExtensionContext): void {
         dispatcher = undefined;
         watcher?.dispose();
         watcher = undefined;
+        relayTracker.dispose();
       },
     }
   );
 
-  // Register the @agent-hub Copilot Chat participant (issue #28).
+  // Register the @agent-hub Copilot Chat participant (issue #28, #45).
+  // relayTracker is shared with LmDispatcher so replies from DM targets
+  // appear in the Chat panel instead of as VS Code notifications.
   registerChatParticipant(
     context,
     () => watcher,
     () => startWatcher(context),
-    log
+    log,
+    relayTracker
   );
 }
 
@@ -290,6 +299,7 @@ export function deactivate(): void {
   dispatcher = undefined;
   watcher?.dispose();
   watcher = undefined;
+  relayTracker.dispose();
   outputChannel?.dispose();
   outputChannel = undefined;
 }
