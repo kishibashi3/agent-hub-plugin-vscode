@@ -26,7 +26,7 @@ const buildOptions = {
   platform: 'node',
   outfile: 'dist/extension.js',
   external: ['vscode'],    // provided by the extension host at runtime
-  logLevel: 'warning',
+  logLevel: 'info',
 };
 
 if (watch) {
