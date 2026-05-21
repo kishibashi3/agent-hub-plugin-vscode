@@ -14,6 +14,7 @@ import {
   LOCALHOST_DEFAULT_URL,
   isDefaultLocalhostUrl,
 } from './agentHub';
+import { AgentHubMcpProvider, MCP_PROVIDER_ID } from './agentHubMcpProvider';
 import { registerChatParticipant } from './chatParticipant';
 import { LmDispatcher } from './lmDispatcher';
 import { RelayTracker } from './relayTracker';
@@ -299,6 +300,19 @@ export function activate(context: vscode.ExtensionContext): void {
     relayTracker,
     stickyHandle
   );
+
+  // Register the agent-hub MCP endpoint with VS Code 1.99+ so Copilot (and
+  // other MCP clients) can call agent-hub tools (`send_message`,
+  // `get_participants`, …) directly without routing through the Chat
+  // participant handler (issue #53).
+  // Auth headers (PAT / trust-mode user) are injected lazily in
+  // AgentHubMcpProvider.resolveMcpServerDefinition.
+  const mcpProvider = new AgentHubMcpProvider(context);
+  context.subscriptions.push(
+    vscode.lm.registerMcpServerDefinitionProvider(MCP_PROVIDER_ID, mcpProvider),
+    mcpProvider
+  );
+  log(`[mcp] registered MCP server definition provider (id=${MCP_PROVIDER_ID})`);
 }
 
 export function deactivate(): void {
