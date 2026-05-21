@@ -31,20 +31,20 @@ The source is split into a **vscode-free protocol / prompt-shaping core** and a 
 | `src/lmDispatcher.ts` | yes | `LmDispatcher` (vscode.lm.sendRequest) — calls `session.getUnread()` / `session.send()` / `session.ack()` — re-exports `formatPrompt` |
 | `src/extension.ts` | yes | `activate`/`deactivate`, command wiring, settings glue |
 
-## Why VS Code Insiders?
+## VS Code version
 
-The Language Model API (`vscode.lm`) is a [proposed API](https://code.visualstudio.com/api/advanced-topics/using-proposed-api), so the extension declares `enabledApiProposals: ["languageModels"]` in `package.json` and must run on VS Code Insiders (or a stabilized future release).
+The Language Model API (`vscode.lm`) shipped as a stable API in VS Code 1.95. The extension targets `"engines": { "vscode": "^1.95.0" }` and no longer requires VS Code Insiders.
 
 ## Install
 
 This extension is **not on the VS Code Marketplace** (`private: true`) — it ships as a sideloadable `.vsix` attached to each GitHub Release. To install:
 
 1. Grab the latest `agent-hub-bridge-vscode-<version>.vsix` from the [Releases page](https://github.com/kishibashi3/agent-hub-bridge-vscode/releases).
-2. Install it into VS Code Insiders:
+2. Install it into VS Code 1.95+:
    ```bash
-   code-insiders --install-extension agent-hub-bridge-vscode-<version>.vsix
+   code --install-extension agent-hub-bridge-vscode-<version>.vsix
    ```
-3. Reload VS Code Insiders.
+3. Reload VS Code.
 
 See [`CHANGELOG.md`](./CHANGELOG.md) for the per-release history.
 
@@ -52,18 +52,20 @@ See [`CHANGELOG.md`](./CHANGELOG.md) for the per-release history.
 
 ```bash
 npm install
-npm run compile      # one-shot build to out/
-npm run watch        # incremental build
-npm run typecheck    # no-emit type check
+npm run compile      # esbuild bundle → dist/extension.js (dev, with sourcemap)
+npm run watch        # esbuild watch mode (incremental)
+npm run typecheck    # tsc type check (no emit)
 npm run lint         # ESLint (typescript-eslint recommended-type-checked)
 npm run lint:fix     # autofix lintable rules where possible
 npm test             # unit tests (node:test via tsx)
 npm run test:watch   # tests in watch mode
 ```
 
-Open this folder in VS Code Insiders and press <kbd>F5</kbd> to launch an Extension Development Host.
+Open this folder in VS Code and press <kbd>F5</kbd> to launch an Extension Development Host.
 
 The unit-test suite targets the vscode-free helpers in `src/protocol.ts` and `src/promptFormat.ts`; the vscode-bound modules (`agentHub.ts` / `ideContext.ts` / `lmDispatcher.ts` / `extension.ts`) are covered by the type checker plus manual smoke-testing in the Extension Development Host. The CI workflow runs `typecheck` + `lint` + `compile` + `test` + `package-check` on every push / PR; the release workflow re-runs the same gates on every `v*.*.*` tag push before building the `.vsix` artefact.
+
+Since v0.5.0 the extension is bundled by [esbuild](https://esbuild.github.io/) (`esbuild.mjs`). `npm run compile` produces a single `dist/extension.js` CJS bundle that inlines all dependencies including `@kishibashi3/agent-hub-sdk`. This resolves the ESM/CJS boundary that caused activation failures with the SDK's `"type": "module"` package (issue [#26](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/26)).
 
 The ESLint config (`eslint.config.mjs`) extends [`typescript-eslint` `recommendedTypeChecked`](https://typescript-eslint.io/users/configs/#recommended-type-checked) and adds one custom rule: `no-restricted-imports` on `src/protocol.ts` / `src/promptFormat.ts` forbids `import * as vscode from 'vscode'`. This lifts the vscode-free / vscode-bound split (see [Module layout](#module-layout) below) from a convention into a lint-enforced invariant.
 

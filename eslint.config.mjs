@@ -20,14 +20,17 @@ export default tseslint.config(
   // 1. Global ignores — paths that ESLint should not visit at all.
   {
     ignores: [
+      // esbuild bundle output directory (since v0.5.0; was `out/` in ≤0.4.0).
+      'dist/**',
+      // Legacy tsc output directory — kept for safety on pre-0.5.0 checkouts.
       'out/**',
       'node_modules/**',
       '.vscode-test/**',
+      // Build script — plain ESM, outside the TS project graph.
+      'esbuild.mjs',
       // eslint.config.mjs is ESM and lives outside the TS project graph;
       // the recommendedTypeChecked rules can't parse it without a
       // dedicated tsconfig, so we exempt it from the type-aware pass.
-      // (Its content is reviewed by hand and small enough that lint
-      // coverage here adds little.)
       'eslint.config.mjs',
     ],
   },

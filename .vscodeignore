@@ -1,20 +1,24 @@
 # vsce ships the contents of the repo MINUS what's matched here.
 #
 # What we WANT in the .vsix (everything else is excluded):
-#   - out/**/*.js + out/**/*.js.map  (runtime + debug sourcemaps)
+#   - dist/extension.js          (esbuild CJS bundle — the extension entry point)
+#   - dist/extension.js.map      (only present in dev builds; omitted in production)
 #   - package.json
 #   - README.md
 #   - LICENSE
 #   - CHANGELOG.md
 #
-# Everything else is build artefact / source / dev-only and stays out.
+# The SDK and all other runtime dependencies are inlined into
+# dist/extension.js by esbuild, so node_modules/ is excluded entirely —
+# no per-package re-include needed.
 
-# Source — the compiled out/ is what ships.
+# Source — dist/extension.js (esbuild bundle) is what ships.
 src/**
 tests/**
 
 # Build / dev config
 tsconfig.json
+esbuild.mjs
 .vscode-test/
 .vscode/
 eslint.config.mjs
@@ -24,23 +28,16 @@ eslint.config.mjs
 .gitignore
 .gitattributes
 
-# Test / typescript leftovers
+# TypeScript source files (dist/ may contain .js.map but never .ts)
 **/*.ts
-!out/**/*.d.ts
 
-# Lockfile + manifests — `package.json` is needed by vsce / VS Code, the
-# lockfile is dev-only. node_modules is excluded by default, but we
-# re-include the SDK so the runtime `require('@kishibashi3/agent-hub-sdk')`
-# inside the .vsix resolves. npm `install-links=true` (see `.npmrc`)
-# ensures `node_modules/@kishibashi3/agent-hub-sdk/` is a real copy of
-# the SDK's `files: []` ship surface (= `dist/` + `src/` + manifests)
-# rather than a symlink to a sibling checkout, so the include below
-# only catches the SDK's own published artefacts — no nested
-# devDependencies follow along.
+# Lockfile + node_modules — all runtime deps are bundled by esbuild.
 package-lock.json
 node_modules/
-!node_modules/@kishibashi3/
-!node_modules/@kishibashi3/agent-hub-sdk/**
+
+# Legacy tsc output directory (kept here in case a stale out/ exists
+# from a pre-0.5.0 checkout; esbuild writes to dist/ instead).
+out/
 
 # Docs we don't ship (PR templates, ADRs, internal notes if any later)
 docs/

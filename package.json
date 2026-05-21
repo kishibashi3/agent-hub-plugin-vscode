@@ -2,7 +2,7 @@
   "name": "agent-hub-bridge-vscode",
   "displayName": "agent-hub bridge (VS Code)",
   "description": "IDE-bound bridge that relays agent-hub DMs into the VS Code Language Model API (Copilot Chat) and posts replies back, with IDE context auto-attached.",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "publisher": "kishibashi3",
   "private": true,
   "license": "MIT",
@@ -16,10 +16,7 @@
   "categories": [
     "Other"
   ],
-  "main": "./out/extension.js",
-  "enabledApiProposals": [
-    "languageModels"
-  ],
+  "main": "./dist/extension.js",
   "activationEvents": [
     "onStartupFinished"
   ],
@@ -139,8 +136,8 @@
     }
   },
   "scripts": {
-    "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./",
+    "compile": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
     "typecheck": "tsc --noEmit -p ./",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
@@ -148,7 +145,7 @@
     "test:watch": "tsx --test --watch tests/**/*.test.ts",
     "package": "vsce package --no-yarn",
     "package:check": "vsce package --no-yarn --out /tmp/agent-hub-bridge-vscode-ci.vsix",
-    "vscode:prepublish": "npm run compile"
+    "vscode:prepublish": "node esbuild.mjs --production"
   },
   "dependencies": {
     "@kishibashi3/agent-hub-sdk": "file:../agent-hub-sdk/js"
@@ -157,6 +154,7 @@
     "@types/node": "^22.10.5",
     "@types/vscode": "^1.95.0",
     "@vscode/vsce": "^3.9.1",
+    "esbuild": "^0.25.12",
     "eslint": "^10.4.0",
     "tsx": "^4.22.2",
     "typescript": "^5.7.2",

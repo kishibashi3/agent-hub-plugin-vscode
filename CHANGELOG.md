@@ -8,9 +8,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-05-22
+
+### Fixed
+- **Activation error on VS Code Stable ([#25](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/25))** — `@kishibashi3/agent-hub-sdk` is ESM-only (`"type": "module"`) and could not be `require()`d by the VS Code extension host when shipped as a raw `node_modules` entry, producing `No "exports" main defined in …/agent-hub-sdk/package.json`. Resolved by switching to esbuild bundling (see Changed below): all runtime dependencies are now inlined into `dist/extension.js` at build time, eliminating the ESM/CJS boundary at runtime.
+
+### Added
+- **`esbuild.mjs` build script** — bundles `src/extension.ts` into a single CJS file (`dist/extension.js`). `vscode` is marked external (provided by the extension host at runtime). Production builds (`--production`) are minified without sourcemaps; development builds include inline sourcemaps.
+- **`esbuild` devDependency** (`^0.25.0`).
+
 ### Changed
-- **agent-hub-sdk migration (L1 dogfood, [#21](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/21))** — the hand-rolled `AgentHubClient` MCP-tools wrapper in `src/protocol.ts` and the bridge-local `InboxMessage` type were retired in favour of `HubSession` / `IncomingMessage` from `@kishibashi3/agent-hub-sdk` (`file:../agent-hub-sdk/js`, see `.npmrc` `install-links=true`). The SDK is consumed through a thin `McpClient` adapter (`src/mcpClient.ts`, ~140 lines) that conforms the existing fetch + JSON-RPC wire layer to the SDK's interface — preserving the `.vsix` bundle size (no `@modelcontextprotocol/sdk` runtime dep) and keeping SSE+reconnect under direct `InboxWatcher` control. `LmDispatcher` now reads `watcher.session?.getUnread()` / `.send()` / `.ack()` in place of `watcher.client?.getMessages()` / `.sendMessage()` / `.markAsRead()`. Field names follow the SDK: `msg.sender` (was `msg.from`) and `msg.body` (was `msg.message`). 3-mode auth (`trust` / `pat` / `pat+override`) stays in bridge-vscode because the SDK's `makeHeaders` is PAT-only — the factory closure hand-builds headers so the SDK's `Config.user` / `tenant` / `url` / `mode` are still honoured. CI gains a sibling `agent-hub-sdk` checkout step (required for the `file:` link to resolve), and `.vscodeignore` re-includes `node_modules/@kishibashi3/agent-hub-sdk/**` so the runtime `require` resolves inside the `.vsix`. **No user-visible behaviour change** — the wire protocol, command surface, and IDE-context attach paths are bit-identical; this is a pure layering refactor that lets bridge-vscode co-evolve with the SDK's typed surface (error classification, `PeerNotFoundError`, etc.) instead of duplicating it.
-- `src/protocol.ts` slimmed down by ~110 lines (removed `AgentHubClient`, `InboxMessage`, `isInboxMessage`). `src/agentHub.ts`'s `client` getter (`AgentHubClient | null`) replaced by `session` getter (`HubSession | null`); rebinds on initial subscribe + each reconnect so the dispatcher follows the watcher across session-id changes naturally.
+- **agent-hub-sdk migration (L1 dogfood, [#21](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/21))** — the hand-rolled `AgentHubClient` MCP-tools wrapper in `src/protocol.ts` and the bridge-local `InboxMessage` type were retired in favour of `HubSession` / `IncomingMessage` from `@kishibashi3/agent-hub-sdk`. The SDK is consumed through a thin `McpClient` adapter (`src/mcpClient.ts`) that conforms the existing fetch + JSON-RPC wire layer to the SDK's interface — preserving the `.vsix` bundle size (no `@modelcontextprotocol/sdk` runtime dep) and keeping SSE+reconnect under direct `InboxWatcher` control. `LmDispatcher` now calls `session.getUnread()` / `session.send()` / `session.ack()`. Field names follow the SDK: `msg.sender` (was `msg.from`) and `msg.body` (was `msg.message`). **No user-visible behaviour change.**
+- `src/protocol.ts` slimmed down by ~110 lines (removed `AgentHubClient`, `InboxMessage`, `isInboxMessage`). `src/agentHub.ts`'s `client` getter (`AgentHubClient | null`) replaced by `session` getter (`HubSession | null`); rebinds on reconnect so the dispatcher follows the watcher across session-id changes.
+- `compile` script: `tsc -p ./` → `node esbuild.mjs` (esbuild bundle to `dist/`).
+- `watch` script: `tsc -watch -p ./` → `node esbuild.mjs --watch`.
+- `vscode:prepublish` script: `npm run compile` → `node esbuild.mjs --production`.
+- `package.json` `main`: `./out/extension.js` → `./dist/extension.js`.
+- `tsconfig.json`: added `noEmit: true` — `tsc` is now typecheck-only; emission is handled by esbuild.
+- `.vscodeignore`: updated for esbuild output (`dist/`); removed the `!node_modules/@kishibashi3/agent-hub-sdk/**` re-include (SDK is inlined by esbuild).
+
+### Removed
+- `enabledApiProposals: ["languageModels"]` from `package.json` — the `vscode.lm` Language Model API is now stable (VS Code 1.95+) and no longer requires opt-in.
 
 ## [0.4.0] — 2026-05-19
 
@@ -75,7 +93,8 @@ First feature-complete release. Closes [#1](https://github.com/kishibashi3/agent
 - **`send_message` reply relay** ([#6](https://github.com/kishibashi3/agent-hub-bridge-vscode/pull/6)): replaces the Step 3 `[response]` log path with a real DM relay back to the original sender. `mark_as_read` runs only on successful relay — any failure leaves the message unread for the next drain to retry.
 - **CI** ([#7](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/7) / [#8](https://github.com/kishibashi3/agent-hub-bridge-vscode/pull/8)): GitHub Actions workflow (Node 22 LTS, `npm ci` → typecheck → compile → test), unit-test suite via `node:test` + `tsx` (1 new devDep, no runtime deps). Refactor: pure helpers split into `src/protocol.ts` + `src/promptFormat.ts` so they're require-able without a VS Code shim. 35 unit-test assertions.
 
-[Unreleased]: https://github.com/kishibashi3/agent-hub-bridge-vscode/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/kishibashi3/agent-hub-bridge-vscode/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/kishibashi3/agent-hub-bridge-vscode/releases/tag/v0.5.0
 [0.4.0]: https://github.com/kishibashi3/agent-hub-bridge-vscode/releases/tag/v0.4.0
 [0.3.0]: https://github.com/kishibashi3/agent-hub-bridge-vscode/releases/tag/v0.3.0
 [0.2.0]: https://github.com/kishibashi3/agent-hub-bridge-vscode/releases/tag/v0.2.0
