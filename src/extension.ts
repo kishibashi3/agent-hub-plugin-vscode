@@ -12,6 +12,7 @@ import {
   isDefaultLocalhostUrl,
 } from './agentHub';
 import { DEFAULT_IDE_CONTEXT_OPTIONS, type IdeContextOptions } from './ideContext';
+import { registerChatParticipant } from './chatParticipant';
 import { LmDispatcher, LmDispatcherConfig } from './lmDispatcher';
 import { fetchGitHubLogin } from './protocol';
 
@@ -366,6 +367,14 @@ export function activate(context: vscode.ExtensionContext): void {
         watcher = undefined;
       },
     }
+  );
+
+  // Register the @agent-hub Copilot Chat participant (issue #29).
+  registerChatParticipant(
+    context,
+    () => watcher,
+    () => startWatcher(context),
+    log
   );
 }
 
