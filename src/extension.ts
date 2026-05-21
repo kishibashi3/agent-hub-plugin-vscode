@@ -369,7 +369,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   );
 
-  // Register the @agent-hub Copilot Chat participant (issue #29).
+  // Register the @agent-hub Copilot Chat participant (issue #28).
   registerChatParticipant(
     context,
     () => watcher,

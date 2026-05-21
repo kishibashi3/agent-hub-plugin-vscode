@@ -1,4 +1,4 @@
-// Copilot Chat participant — `@agent-hub` (issue #29).
+// Copilot Chat participant — `@agent-hub` (issue #28).
 //
 // Registers a VS Code Chat participant so users can send DMs to
 // agent-hub participants directly from the Copilot Chat panel:
