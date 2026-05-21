@@ -25,6 +25,7 @@ import type {
 } from '@kishibashi3/agent-hub-sdk';
 
 import type { InboxMessageNotification, InboxWatcher } from './agentHub';
+import { type RelayTracker } from './relayTracker';
 import {
   collectIdeContext,
   EMPTY_IDE_CONTEXT_SNAPSHOT,
@@ -55,6 +56,14 @@ export interface LmDispatcherDeps {
   readonly watcher: InboxWatcher;
   readonly cfg: LmDispatcherConfig;
   readonly log: Logger;
+  /**
+   * Tracks pending relay waiters from the Chat participant (issue #32).
+   * When set, `dispatchOne` calls `relayTracker.tryResolve(msg)` before
+   * any LM work. If the call returns `true` the message was consumed by
+   * a relay waiter (forwarded to the Chat panel) and LM processing is
+   * skipped. If `undefined`, every message is dispatched autonomously.
+   */
+  readonly relayTracker?: RelayTracker;
   /**
    * Injection points for testing — production wiring passes the real
    * `vscode.lm.selectChatModels` and a fresh `CancellationTokenSource`.
@@ -166,6 +175,20 @@ export class LmDispatcher {
     this.deps.log(
       `[dispatch] from=${msg.sender} id=${msg.id}: ${truncate(msg.body, 80)}`
     );
+
+    // ── Relay mode (issue #32) ───────────────────────────────────────────
+    // If the Chat participant is currently awaiting a reply from this
+    // sender, hand the message directly to the waiting promise instead of
+    // routing it through the LM. The relay waiter is responsible for
+    // rendering the reply in the Chat panel.
+    if (this.deps.relayTracker?.tryResolve(msg)) {
+      this.deps.log(
+        `[relay] forwarded reply from ${msg.sender} to Chat panel — skipping LM (msg=${msg.id})`
+      );
+      await this.markRead(msg);
+      return;
+    }
+    // ────────────────────────────────────────────────────────────────────
 
     const model = await this.pickModel();
     if (!model) return; // already logged

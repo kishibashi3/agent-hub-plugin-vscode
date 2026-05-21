@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-05-22
+
+### Added
+- **Relay mode for Chat participant ([#32](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/32))** — when the user sends a DM via `@agent-hub @<handle> <message>`, the bridge now waits up to 30 s for the recipient's reply and streams it back to the Copilot Chat panel. Previously the reply landed in the inbox and was mistakenly routed through the LM instead of being surfaced to the user.
+- `src/relayTracker.ts` — vscode-free `RelayTracker` class (FIFO waiter map keyed by sender handle) + `RelayTimeout` error. `LmDispatcher.dispatchOne()` calls `tryResolve(msg)` before any LM work; if the caller is a pending Chat participant waiter the message is consumed and LM processing is skipped.
+- 9 new unit-test assertions for `RelayTracker` in `tests/relayTracker.test.ts`.
+- `relayTracker.ts` added to the `no-restricted-imports(vscode)` ESLint rule in `eslint.config.mjs`.
+
+### Changed
+- `chatParticipant.ts` — after `session.send()`, registers a relay waiter and awaits the reply with a 30 s timeout. Shows `⏱️` fallback message on timeout. Respects the VS Code `CancellationToken`.
+- `lmDispatcher.ts` — new optional `relayTracker?: RelayTracker` dep in `LmDispatcherDeps`. `dispatchOne()` short-circuits to `markRead + return` when `tryResolve` returns `true`.
+- `extension.ts` — constructs a single shared `RelayTracker` instance and threads it into both `LmDispatcher` and `registerChatParticipant`.
+
 ## [0.7.0] — 2026-05-22
 
 ### Fixed
@@ -112,7 +125,8 @@ First feature-complete release. Closes [#1](https://github.com/kishibashi3/agent
 - **`send_message` reply relay** ([#6](https://github.com/kishibashi3/agent-hub-bridge-vscode/pull/6)): replaces the Step 3 `[response]` log path with a real DM relay back to the original sender. `mark_as_read` runs only on successful relay — any failure leaves the message unread for the next drain to retry.
 - **CI** ([#7](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/7) / [#8](https://github.com/kishibashi3/agent-hub-bridge-vscode/pull/8)): GitHub Actions workflow (Node 22 LTS, `npm ci` → typecheck → compile → test), unit-test suite via `node:test` + `tsx` (1 new devDep, no runtime deps). Refactor: pure helpers split into `src/protocol.ts` + `src/promptFormat.ts` so they're require-able without a VS Code shim. 35 unit-test assertions.
 
-[Unreleased]: https://github.com/kishibashi3/agent-hub-bridge-vscode/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/kishibashi3/agent-hub-bridge-vscode/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/kishibashi3/agent-hub-bridge-vscode/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/kishibashi3/agent-hub-bridge-vscode/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/kishibashi3/agent-hub-bridge-vscode/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/kishibashi3/agent-hub-bridge-vscode/releases/tag/v0.5.0
