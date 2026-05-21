@@ -72,7 +72,7 @@
         "agentHubBridge.defaultHandle": {
           "type": "string",
           "default": "",
-          "description": "Default DM recipient when no @handle is given and no sticky handle is set (e.g. @planner). Leave blank to show the participant picker."
+          "description": "Default DM recipient when no @handle is given and no sticky handle is set (e.g. @planner). Leave blank to use sticky handle or show usage hint. Type @@ to open the participant picker."
         }
       }
     }
