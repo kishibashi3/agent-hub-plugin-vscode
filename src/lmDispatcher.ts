@@ -25,7 +25,7 @@ import type {
 } from '@kishibashi3/agent-hub-sdk';
 
 import type { InboxMessageNotification, InboxWatcher } from './agentHub';
-import { type RelayTracker } from './relayTracker';
+import { type SentPeers } from './sentPeers';
 import {
   collectIdeContext,
   EMPTY_IDE_CONTEXT_SNAPSHOT,
@@ -57,13 +57,13 @@ export interface LmDispatcherDeps {
   readonly cfg: LmDispatcherConfig;
   readonly log: Logger;
   /**
-   * Tracks pending relay waiters from the Chat participant (issue #32).
-   * When set, `dispatchOne` calls `relayTracker.tryResolve(msg)` before
-   * any LM work. If the call returns `true` the message was consumed by
-   * a relay waiter (forwarded to the Chat panel) and LM processing is
-   * skipped. If `undefined`, every message is dispatched autonomously.
+   * Registry of handles the Chat participant has sent DMs to (issue #32).
+   * When set, `dispatchOne` calls `sentPeers.has(msg.sender)` before any
+   * LM work. If the sender is a known contact, the message is ack'd and
+   * shown as a VS Code notification instead of being routed through the
+   * LM. If `undefined`, every message is dispatched autonomously.
    */
-  readonly relayTracker?: RelayTracker;
+  readonly sentPeers?: SentPeers;
   /**
    * Injection points for testing — production wiring passes the real
    * `vscode.lm.selectChatModels` and a fresh `CancellationTokenSource`.
@@ -176,14 +176,17 @@ export class LmDispatcher {
       `[dispatch] from=${msg.sender} id=${msg.id}: ${truncate(msg.body, 80)}`
     );
 
-    // ── Relay mode (issue #32) ───────────────────────────────────────────
-    // If the Chat participant is currently awaiting a reply from this
-    // sender, hand the message directly to the waiting promise instead of
-    // routing it through the LM. The relay waiter is responsible for
-    // rendering the reply in the Chat panel.
-    if (this.deps.relayTracker?.tryResolve(msg)) {
+    // ── Sent-peer intercept (issue #32) ─────────────────────────────────
+    // If this message is a reply from a handle the Chat participant has
+    // already DM'd, skip the LM entirely — show the reply as a VS Code
+    // notification and log it to the output channel. This prevents the
+    // bridge from generating an unwanted autonomous reply back to the peer.
+    if (this.deps.sentPeers?.has(msg.sender)) {
       this.deps.log(
-        `[relay] forwarded reply from ${msg.sender} to Chat panel — skipping LM (msg=${msg.id})`
+        `[relay] reply from ${msg.sender} (known contact) — skipping LM, showing notification (msg=${msg.id})`
+      );
+      void vscode.window.showInformationMessage(
+        `agent-hub — ${msg.sender}: ${truncate(msg.body, 120)}`
       );
       await this.markRead(msg);
       return;

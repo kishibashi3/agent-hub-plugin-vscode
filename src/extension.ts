@@ -14,7 +14,7 @@ import {
 import { DEFAULT_IDE_CONTEXT_OPTIONS, type IdeContextOptions } from './ideContext';
 import { registerChatParticipant } from './chatParticipant';
 import { LmDispatcher, LmDispatcherConfig } from './lmDispatcher';
-import { RelayTracker } from './relayTracker';
+import { SentPeers } from './sentPeers';
 import { fetchGitHubLogin } from './protocol';
 
 const SECRET_KEY_GITHUB_PAT = 'agentHubBridge.githubPat';
@@ -34,11 +34,11 @@ let outputChannel: vscode.OutputChannel | undefined;
 let watcher: InboxWatcher | undefined;
 let watcherDisposable: vscode.Disposable | undefined;
 let dispatcher: LmDispatcher | undefined;
-// Single shared RelayTracker instance — wired into both the Chat
-// participant (registers waiters) and LmDispatcher (resolves waiters).
-// Lifetime: same as the extension (created in activate, lives until
-// deactivate). No dispose needed — waiters time out automatically.
-const relayTracker = new RelayTracker();
+// Single shared SentPeers instance — wired into both the Chat participant
+// (registers DM targets) and LmDispatcher (intercepts replies).
+// Lifetime: same as the extension (created in activate, persists until
+// deactivate). No dispose needed — it is a plain Set with no timers.
+const sentPeers = new SentPeers();
 
 function log(msg: string): void {
   const ts = new Date().toISOString();
@@ -186,7 +186,7 @@ async function startWatcher(context: vscode.ExtensionContext): Promise<void> {
   }
 
   const w = new InboxWatcher(config, log);
-  const d = new LmDispatcher({ watcher: w, cfg: readDispatcherConfig(), log, relayTracker });
+  const d = new LmDispatcher({ watcher: w, cfg: readDispatcherConfig(), log, sentPeers });
   // Subscribe before start() so we never miss the first event the watcher
   // emits after subscribe returns. The dispatcher's onInboxNotification
   // requestDrain()s, which then fetches *all* unread messages — so even if
@@ -376,15 +376,15 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   // Register the @agent-hub Copilot Chat participant (issue #28).
-  // relayTracker is shared with LmDispatcher so Chat-originated DM replies
-  // are forwarded to the Chat panel instead of being routed through the LM
+  // sentPeers is shared with LmDispatcher so Chat-originated DM replies
+  // are intercepted (VS Code notification) instead of being routed through the LM
   // (issue #32).
   registerChatParticipant(
     context,
     () => watcher,
     () => startWatcher(context),
     log,
-    relayTracker
+    sentPeers
   );
 }
 
