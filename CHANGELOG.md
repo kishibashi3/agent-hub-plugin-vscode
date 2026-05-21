@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-05-22
+
+### Fixed
+- **bridge-vscode visible in `get_participants` ([#23](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/23))** — `InboxWatcher` now calls `session.register()` after every successful subscribe (initial start and each reconnect). Previously the bridge bypassed `AgentHub.connect()` auto-register and had no explicit `register()` call, making it permanently invisible in `get_participants`. Register failures are non-fatal: a `[WARN]` log is emitted and the watcher continues running.
+- `displayName` in `bindSession()` changed from `null` to `"VS Code bridge"` so the participant registry shows a human-readable label rather than falling back to the raw user ID.
+
+### Changed
+- `package.json` version bumped from `0.5.0` → `0.7.0` (0.6.0 entry existed in CHANGELOG but the `package.json` bump was omitted in PR #30; corrected here by jumping directly to 0.7.0).
+
 ## [0.6.0] — 2026-05-22
 
 ### Added
@@ -103,7 +112,9 @@ First feature-complete release. Closes [#1](https://github.com/kishibashi3/agent
 - **`send_message` reply relay** ([#6](https://github.com/kishibashi3/agent-hub-bridge-vscode/pull/6)): replaces the Step 3 `[response]` log path with a real DM relay back to the original sender. `mark_as_read` runs only on successful relay — any failure leaves the message unread for the next drain to retry.
 - **CI** ([#7](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/7) / [#8](https://github.com/kishibashi3/agent-hub-bridge-vscode/pull/8)): GitHub Actions workflow (Node 22 LTS, `npm ci` → typecheck → compile → test), unit-test suite via `node:test` + `tsx` (1 new devDep, no runtime deps). Refactor: pure helpers split into `src/protocol.ts` + `src/promptFormat.ts` so they're require-able without a VS Code shim. 35 unit-test assertions.
 
-[Unreleased]: https://github.com/kishibashi3/agent-hub-bridge-vscode/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/kishibashi3/agent-hub-bridge-vscode/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/kishibashi3/agent-hub-bridge-vscode/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/kishibashi3/agent-hub-bridge-vscode/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/kishibashi3/agent-hub-bridge-vscode/releases/tag/v0.5.0
 [0.4.0]: https://github.com/kishibashi3/agent-hub-bridge-vscode/releases/tag/v0.4.0
 [0.3.0]: https://github.com/kishibashi3/agent-hub-bridge-vscode/releases/tag/v0.3.0
