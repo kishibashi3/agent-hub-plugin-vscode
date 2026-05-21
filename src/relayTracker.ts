@@ -75,6 +75,27 @@ export class RelayTracker {
     return true;
   }
 
+  /**
+   * Remove the pending waiter for `sender` **without** rejecting it.
+   *
+   * Call this when the Chat-panel request is cancelled (user hits Escape) so
+   * the next reply from `sender` falls through to the VS Code notification
+   * path instead of being silently consumed by the now-orphaned waiter.
+   *
+   * Contrast with `_cancel()` (private) which rejects — used internally when
+   * a second `waitFor` for the same sender displaces the first, or on dispose.
+   */
+  cancel(sender: string): void {
+    const waiter = this.waiters.get(sender);
+    if (!waiter) return;
+    clearTimeout(waiter.timer);
+    this.waiters.delete(sender);
+    // Do NOT call waiter.reject — Promise.race has already settled via the
+    // cancelPromise rejection; the orphaned waiter.reject would be silently
+    // discarded. Removing from the map is sufficient to restore the
+    // notification path for any subsequent reply.
+  }
+
   /** Cancel and remove all pending waiters — call on extension deactivate. */
   dispose(): void {
     for (const sender of [...this.waiters.keys()]) {

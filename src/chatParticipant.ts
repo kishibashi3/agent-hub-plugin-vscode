@@ -125,8 +125,12 @@ export function registerChatParticipant(
         if (err instanceof RelayTimeout) {
           log(`[chat] relay timeout waiting for reply from ${to}`);
           response.markdown(`\n\n⏱ No reply within ${Math.round(RELAY_TIMEOUT_MS / 1000)}s.`);
+        } else {
+          // Cancellation (or unexpected error) — remove the waiter from the map
+          // so any reply that arrives before the 60s timer fires is routed to a
+          // VS Code notification instead of being silently consumed (issue #45).
+          relayTracker.cancel(to);
         }
-        // Cancellation or unexpected error — exit silently (stream is closing).
       }
     }
   );
