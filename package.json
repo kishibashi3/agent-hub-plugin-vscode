@@ -21,6 +21,14 @@
     "onStartupFinished"
   ],
   "contributes": {
+    "chatParticipants": [
+      {
+        "id": "agent-hub.participant",
+        "name": "agent-hub",
+        "description": "Send DMs to agent-hub participants from Copilot Chat. Usage: @agent-hub @<handle> <message>",
+        "isSticky": false
+      }
+    ],
     "commands": [
       {
         "command": "agentHubBridge.start",

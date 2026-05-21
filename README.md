@@ -4,18 +4,37 @@
 
 IDE-bound bridge for [agent-hub](https://github.com/kishibashi3/agent-hub). Runs as a VS Code extension and relays DMs into the VS Code Language Model API (Copilot Chat), with IDE context (active editor, selection, diagnostics) auto-attached.
 
-> **Status:** complete. Shipped: scaffold + SSE inbox watch + LM bridging + IDE-context auto-attach + reply relay ([#1](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/1)), CI ([#7](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/7)), SecretStorage migration ([#9](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/9)), git-diff attach ([#11](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/11)), multi-pane + notebook awareness ([#13](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/13)), build & release pipeline + ESLint ([#16](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/16), [#19](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/19)), SDK migration — `HubSession` / `IncomingMessage` from `@kishibashi3/agent-hub-sdk` ([#21](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/21)).
+> **Status:** complete. Shipped: scaffold + SSE inbox watch + LM bridging + IDE-context auto-attach + reply relay ([#1](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/1)), CI ([#7](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/7)), SecretStorage migration ([#9](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/9)), git-diff attach ([#11](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/11)), multi-pane + notebook awareness ([#13](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/13)), build & release pipeline + ESLint ([#16](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/16), [#19](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/19)), SDK migration ([#21](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/21)), esbuild bundling ([#25](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/25)), `@agent-hub` Chat Participant ([#28](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/28)).
 
 ## Architecture
 
 ```
-VS Code (Insiders)
+VS Code 1.95+
   └── agent-hub-bridge-vscode (this extension)
-        ├── inbox watch (agent-hub SSE)
+        ├── inbox watch (agent-hub SSE)          ← inbound: DM → LM → reply
         ├── DM → vscode.lm.sendRequest (Copilot Chat)
         ├── auto-attach IDE context (active file / selection / diagnostics)
-        └── reply → agent-hub send_message
+        ├── reply → agent-hub send_message
+        └── @agent-hub Chat Participant           ← outbound: Chat → DM
+              └── @agent-hub @<handle> <message> → session.send()
 ```
+
+## Chat Participant — outbound DM
+
+Type `@agent-hub` in the Copilot Chat panel to send a direct message to any agent-hub participant:
+
+```
+@agent-hub @planner 今日のタスクは？
+@agent-hub @team-backend デプロイ状況を確認して
+@agent-hub @ope-ultp1635 restart bridge-claude
+```
+
+**Format:** `@agent-hub @<handle> <message body>`
+
+- The first word after `@agent-hub` must be the recipient handle (starts with `@`).
+- The rest of the prompt is the message body (may span multiple lines).
+- If the inbox watch is not running it is **auto-started** before sending.
+- The send is **fire-and-forget**: the acknowledgement appears instantly in the chat panel and any reply from the recipient arrives via the normal inbox-watch → LM-dispatch → reply-relay pipeline.
 
 ### Module layout
 
@@ -26,9 +45,11 @@ The source is split into a **vscode-free protocol / prompt-shaping core** and a 
 | `src/protocol.ts` | no | MCP types, constants, pure helpers (`extractJsonRpcResponse`, `extractTextContent`, `nextBackoffMs`, `resolveAuth`, `isDefaultLocalhostUrl`). `AgentHubClient` and `InboxMessage` were retired in favour of the SDK ([#21](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/21)). |
 | `src/mcpClient.ts` | no | `createVscodeFetchMcpClient` factory — thin `McpClient` adapter that conforms the bridge's existing fetch + JSON-RPC transport to the `@kishibashi3/agent-hub-sdk` interface; preserves `.vsix` bundle size (no `@modelcontextprotocol/sdk` runtime dep). |
 | `src/promptFormat.ts` | no | `formatPrompt`, `formatIdeContext`, IDE-snapshot data types, `DEFAULT_IDE_CONTEXT_OPTIONS`, `EMPTY_IDE_CONTEXT_SNAPSHOT` |
+| `src/chatParticipantCore.ts` | no | `parsePrompt` — pure helper that parses `@<handle> <body>` from a Copilot Chat prompt string |
 | `src/agentHub.ts` | yes | `InboxWatcher` (vscode.EventEmitter); exposes `session` getter (`HubSession \| null`) rebuilt per successful subscribe via `McpClient` adapter — re-exports the protocol layer for surface compatibility |
 | `src/ideContext.ts` | yes | `collectIdeContext` (vscode.window.activeTextEditor + vscode.languages.getDiagnostics) — re-exports the prompt-format layer |
 | `src/lmDispatcher.ts` | yes | `LmDispatcher` (vscode.lm.sendRequest) — calls `session.getUnread()` / `session.send()` / `session.ack()` — re-exports `formatPrompt` |
+| `src/chatParticipant.ts` | yes | `registerChatParticipant` — registers the `@agent-hub` chat participant; re-exports `parsePrompt` from core |
 | `src/extension.ts` | yes | `activate`/`deactivate`, command wiring, settings glue |
 
 ## VS Code version

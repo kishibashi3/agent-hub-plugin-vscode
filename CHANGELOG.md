@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-05-22
+
+### Added
+- **`@agent-hub` Copilot Chat participant ([#28](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/28))** — registers `@agent-hub` as a VS Code Copilot Chat participant so users can send DMs to agent-hub peers directly from the IDE chat panel without leaving VS Code. Usage: `@agent-hub @<handle> <message>` (e.g. `@agent-hub @planner 今日のタスクは？`). Flow is fire-and-forget (Option A): the message is delivered via `session.send()` and any reply arrives through the existing inbox-watch → LM-dispatch → reply-relay pipeline. The watcher is auto-started if not running.
+- `src/chatParticipantCore.ts` — vscode-free `parsePrompt` helper (same split pattern as `protocol.ts` / `promptFormat.ts`) so it can be unit-tested without a VS Code extension-host shim.
+- `src/chatParticipant.ts` — vscode-bound `registerChatParticipant` (re-exports `parsePrompt` from core for surface compatibility) + `CHAT_PARTICIPANT_ID`.
+- 11 new unit-test assertions for `parsePrompt` in `tests/chatParticipant.test.ts`.
+- `chatParticipants` contribution in `package.json` (`id: "agent-hub.participant"`, `name: "agent-hub"`).
+- `eslint.config.mjs`: `src/chatParticipantCore.ts` added to the `no-restricted-imports(vscode)` rule alongside `protocol.ts` and `promptFormat.ts`.
+
 ## [0.5.0] — 2026-05-22
 
 ### Fixed
