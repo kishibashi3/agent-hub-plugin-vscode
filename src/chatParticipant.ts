@@ -180,12 +180,11 @@ export function registerChatParticipant(
         log(`[chat] picker: to=${to} body=${JSON.stringify(body.slice(0, 80))}`);
       }
 
-      // Update sticky handle for next turn.
-      lastHandle = to;
-
       // ── Send + relay wait ─────────────────────────────────────────────
       try {
         await session.send(to, body);
+        // Update sticky handle only after a successful send (issue #47 Minor #1).
+        lastHandle = to;
         log(`[chat] sent to ${to}`);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
