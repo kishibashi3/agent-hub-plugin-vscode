@@ -54,7 +54,7 @@ export function registerChatParticipant(
 ): void {
   const participant = vscode.chat.createChatParticipant(
     CHAT_PARTICIPANT_ID,
-    async (request, _chatContext, response, _token) => {
+    async (request, _chatContext, response, token) => {
       const parsed = parsePrompt(request.prompt);
 
       if (!parsed) {
@@ -71,6 +71,8 @@ export function registerChatParticipant(
         log('[chat] no active session — auto-starting inbox watch');
         response.markdown('🔄 Starting inbox watch…\n\n');
         await autoStart();
+        // Bail out if the user cancelled during the potentially slow start.
+        if (token.isCancellationRequested) return;
         w = getWatcher();
       }
 
