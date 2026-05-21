@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 // Import from the vscode-free core module so tsx can load it without a VS Code shim.
-import { parsePrompt } from '../src/chatParticipantCore';
+import { parseHandle, parsePrompt } from '../src/chatParticipantCore';
 
 describe('parsePrompt', () => {
   // ── Happy-path cases ────────────────────────────────────────────────
@@ -66,5 +66,45 @@ describe('parsePrompt', () => {
 
   it('returns null for a plain message starting with a word', () => {
     assert.equal(parsePrompt('hello @planner'), null);
+  });
+});
+
+describe('parseHandle', () => {
+  // ── Returns handle + body when both present ──────────────────────────
+
+  it('parses a handle with a body', () => {
+    assert.deepEqual(parseHandle('@planner hello'), { handle: '@planner', body: 'hello' });
+  });
+
+  it('parses a handle-only prompt (body is empty string)', () => {
+    assert.deepEqual(parseHandle('@reviewer'), { handle: '@reviewer', body: '' });
+  });
+
+  it('trims whitespace around the body', () => {
+    const r = parseHandle('@planner   hello   ');
+    assert.ok(r);
+    assert.equal(r.handle, '@planner');
+    assert.equal(r.body, 'hello');
+  });
+
+  it('handles a multi-word body', () => {
+    const r = parseHandle('@team-backend deploy now please');
+    assert.ok(r);
+    assert.equal(r.handle, '@team-backend');
+    assert.equal(r.body, 'deploy now please');
+  });
+
+  // ── Returns null when no @handle at start ────────────────────────────
+
+  it('returns null for an empty string', () => {
+    assert.equal(parseHandle(''), null);
+  });
+
+  it('returns null for a bare message with no leading @handle', () => {
+    assert.equal(parseHandle('hello'), null);
+  });
+
+  it('returns null for a message starting with a word then @handle', () => {
+    assert.equal(parseHandle('hello @planner'), null);
   });
 });

@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-05-22
+
+### Added
+- **Participant picker + sticky handle ([#47](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/47))** — when `@agent-hub` is invoked without an explicit `@<handle>`, a `vscode.window.showQuickPick` lists all current participants (online first, then offline). The last-used recipient is pinned at the top. If the body is also missing, a `showInputBox` prompts for the message.
+- `parseHandle` helper in `src/chatParticipantCore.ts` — extracts a leading `@handle` from a prompt even when the body is absent. Used to skip the QuickPick when the user types `@agent-hub @<handle>` without a message body.
+- 7 new unit tests for `parseHandle` in `tests/chatParticipant.test.ts`.
+- 3 new unit tests for `RelayTracker.cancel()` in `tests/relayTracker.test.ts`.
+
+### Changed
+- `src/chatParticipant.ts` — `registerChatParticipant` now handles three prompt shapes: (A) `@handle body` → direct relay, (B) `@handle` only → InputBox for body, (C) no handle → QuickPick + optional InputBox. Sticky handle (`lastHandle`) is remembered across turns within the extension session.
+
 ## [0.9.0] — 2026-05-22
 
 ### Added
