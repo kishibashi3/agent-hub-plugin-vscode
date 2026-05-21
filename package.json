@@ -1,7 +1,7 @@
 {
   "name": "agent-hub-bridge-vscode",
   "displayName": "agent-hub bridge (VS Code)",
-  "description": "IDE-bound bridge that relays agent-hub DMs into the VS Code Language Model API (Copilot Chat) and posts replies back, with IDE context auto-attached.",
+  "description": "VS Code extension that connects to agent-hub: watch your inbox as notifications and send DMs via the @agent-hub Copilot Chat participant.",
   "version": "0.8.0",
   "publisher": "kishibashi3",
   "private": true,
@@ -68,77 +68,6 @@
           "type": "string",
           "default": "",
           "description": "Tenant identifier (X-Tenant-Id). Leave blank for default tenant."
-        },
-        "agentHubBridge.systemPrompt": {
-          "type": "string",
-          "default": "",
-          "description": "System prompt prepended to every DM forwarded to the language model. Leave empty to use the built-in default (\"You are an AI agent participating in agent-hub …\")."
-        },
-        "agentHubBridge.languageModel.vendor": {
-          "type": "string",
-          "default": "copilot",
-          "description": "Chat-model vendor passed to vscode.lm.selectChatModels (e.g. \"copilot\")."
-        },
-        "agentHubBridge.languageModel.family": {
-          "type": "string",
-          "default": "",
-          "description": "Optional family filter for vscode.lm.selectChatModels (e.g. \"gpt-4o\"). Empty = no family constraint."
-        },
-        "agentHubBridge.ideContext.enabled": {
-          "type": "boolean",
-          "default": true,
-          "description": "Auto-attach IDE context (active editor URI, selection or cursor-window text, diagnostics) to every forwarded DM. Disable if you want the bridge to behave like a headless agent."
-        },
-        "agentHubBridge.ideContext.maxSelectionChars": {
-          "type": "number",
-          "default": 4000,
-          "minimum": 0,
-          "description": "Character cap on selection text forwarded to the LM. Longer selections are truncated with an ellipsis. Set to 0 to suppress the selection block entirely (the cursor-window block is NOT used as a fallback; pair with windowLinesAroundCursor=0 if you want no code text shared at all)."
-        },
-        "agentHubBridge.ideContext.maxDiagnostics": {
-          "type": "number",
-          "default": 20,
-          "minimum": 0,
-          "description": "Cap on number of diagnostics (errors/warnings) forwarded per dispatch. Sorted error-first, then by line. Set to 0 to suppress diagnostics entirely."
-        },
-        "agentHubBridge.ideContext.windowLinesAroundCursor": {
-          "type": "number",
-          "default": 20,
-          "minimum": 0,
-          "description": "Lines of surrounding code to forward when there's no active selection. Set to 0 to suppress the cursor-window block."
-        },
-        "agentHubBridge.ideContext.gitDiff.enabled": {
-          "type": "boolean",
-          "default": false,
-          "description": "Opt-in: attach the working-tree git diff of the repo owning the active editor. OFF by default because diffs can carry sensitive in-flight code. Reads via the bundled `vscode.git` extension; no shell-out."
-        },
-        "agentHubBridge.ideContext.gitDiff.maxFiles": {
-          "type": "number",
-          "default": 5,
-          "minimum": 0,
-          "description": "Cap on files included in the git-diff block (sorted: modified → added → deleted → renamed → conflicted → untracked → other). Set to 0 to suppress all file diffs while still showing the header."
-        },
-        "agentHubBridge.ideContext.gitDiff.maxCharsPerFile": {
-          "type": "number",
-          "default": 1500,
-          "minimum": 0,
-          "description": "Per-file diff truncation cap (characters). Set to 0 to suppress diff bodies entirely — only paths + statuses are forwarded."
-        },
-        "agentHubBridge.ideContext.gitDiff.includeUntracked": {
-          "type": "boolean",
-          "default": false,
-          "description": "Whether `?? new-file.txt` working-tree entries appear. OFF by default — new files are often sensitive (drafts, secrets, scaffolds)."
-        },
-        "agentHubBridge.ideContext.multiEditor.maxSecondaryEditors": {
-          "type": "number",
-          "default": 3,
-          "minimum": 0,
-          "description": "Cap on the number of *secondary* (non-active visible) text editors surfaced as header-only entries (URI + language + cursor only — no selection, window, or diagnostics). Set to 0 to suppress the section and skip enumeration entirely."
-        },
-        "agentHubBridge.ideContext.notebook.enabled": {
-          "type": "boolean",
-          "default": true,
-          "description": "Whether to snapshot the active notebook editor's header (URI, type, cell position, active-cell language). Per-cell content is never included regardless — see issue #13 for out-of-scope rationale."
         }
       }
     }

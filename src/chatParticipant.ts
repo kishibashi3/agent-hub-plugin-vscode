@@ -6,14 +6,12 @@
 //   @agent-hub @planner 今日のタスクは？
 //   @agent-hub @team-backend デプロイ状況を確認して
 //
-// Flow — fire-and-forget + reply intercept (issue #32):
+// Flow (Option A — fire-and-forget):
 //   1. Parse `@<handle> <body>` from request.prompt.
 //   2. If no active session, call autoStart() to start inbox watch.
 //   3. Call session.send(to, body).
-//   4. Register `to` in SentPeers so LmDispatcher skips LM for replies.
-//   5. Report "sent ✅" in the chat response stream immediately.
-//      Replies (if any) arrive via the inbox watch flow and are shown
-//      as VS Code notifications rather than being routed through the LM.
+//   4. Report "sent ✅" in the chat response stream.
+//      The reply (if any) arrives via the normal inbox watch flow.
 //
 // This module is vscode-bound (imports vscode) so it lives in the
 // vscode-bound layer alongside agentHub.ts / lmDispatcher.ts.
@@ -26,7 +24,6 @@ import type { InboxWatcher } from './agentHub';
 // Re-exported here for call sites that `import { parsePrompt } from './chatParticipant'`.
 export { parsePrompt } from './chatParticipantCore';
 import { parsePrompt } from './chatParticipantCore';
-import { SentPeers } from './sentPeers';
 
 export const CHAT_PARTICIPANT_ID = 'agent-hub.participant';
 
@@ -48,16 +45,12 @@ const USAGE_MARKDOWN = [
  * @param autoStart  Called when no session is active; starts inbox watch.
  *                   Must resolve after the watcher session is usable.
  * @param log        Output-channel logger (same as extension.ts `log`).
- * @param sentPeers  Shared with `LmDispatcher` — after a successful send,
- *                   the recipient handle is registered here so the dispatcher
- *                   skips LM processing for their replies (issue #32).
  */
 export function registerChatParticipant(
   context: vscode.ExtensionContext,
   getWatcher: () => InboxWatcher | undefined,
   autoStart: () => Promise<void>,
-  log: (msg: string) => void,
-  sentPeers: SentPeers
+  log: (msg: string) => void
 ): void {
   const participant = vscode.chat.createChatParticipant(
     CHAT_PARTICIPANT_ID,
@@ -92,12 +85,9 @@ export function registerChatParticipant(
         return;
       }
 
-      // ── Send (fire-and-forget) ────────────────────────────────────────
+      // ── Send ─────────────────────────────────────────────────────────
       try {
         await session.send(to, body);
-        // Register the recipient so LmDispatcher intercepts their reply
-        // instead of passing it to the LM (issue #32).
-        sentPeers.add(to);
         log(`[chat] sent to ${to}`);
         response.markdown(`✅ Sent to **${to}**\n\n> ${body}`);
       } catch (err) {

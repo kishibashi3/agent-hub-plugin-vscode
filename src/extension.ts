@@ -1,7 +1,10 @@
 // agent-hub-bridge-vscode — entry point.
 //
-// Step 2 wires the SSE inbox watch (see `./agentHub.ts`). LM bridging,
-// IDE context auto-attach, and reply relay still arrive in later PRs.
+// Wires the SSE inbox watch (`./agentHub.ts`) and the @agent-hub Chat
+// participant (`./chatParticipant.ts`).
+//
+// Inbound DMs are surfaced as VS Code notifications (no LM invocation).
+// LM auto-dispatch was removed in v0.8.0 (issue #35).
 
 import * as vscode from 'vscode';
 
@@ -11,34 +14,18 @@ import {
   LOCALHOST_DEFAULT_URL,
   isDefaultLocalhostUrl,
 } from './agentHub';
-import { DEFAULT_IDE_CONTEXT_OPTIONS, type IdeContextOptions } from './ideContext';
 import { registerChatParticipant } from './chatParticipant';
-import { LmDispatcher, LmDispatcherConfig } from './lmDispatcher';
-import { SentPeers } from './sentPeers';
+import { LmDispatcher } from './lmDispatcher';
 import { fetchGitHubLogin } from './protocol';
 
 const SECRET_KEY_GITHUB_PAT = 'agentHubBridge.githubPat';
 
 const CHANNEL_NAME = 'agent-hub bridge';
 
-const DEFAULT_SYSTEM_PROMPT =
-  'You are an AI agent participating in agent-hub, a multi-agent ' +
-  'collaboration platform. The user has sent you a direct message. ' +
-  'Respond helpfully and concisely. Keep the reply focused on the ' +
-  'message — no excessive greetings, no echoing the prompt back.';
-
-const DEFAULT_JUSTIFICATION =
-  'agent-hub bridge is responding to a DM relayed from another participant.';
-
 let outputChannel: vscode.OutputChannel | undefined;
 let watcher: InboxWatcher | undefined;
 let watcherDisposable: vscode.Disposable | undefined;
 let dispatcher: LmDispatcher | undefined;
-// Single shared SentPeers instance — wired into both the Chat participant
-// (registers DM targets) and LmDispatcher (intercepts replies).
-// Lifetime: same as the extension (created in activate, persists until
-// deactivate). No dispose needed — it is a plain Set with no timers.
-const sentPeers = new SentPeers();
 
 function log(msg: string): void {
   const ts = new Date().toISOString();
@@ -62,95 +49,6 @@ async function readConfig(context: vscode.ExtensionContext): Promise<BridgeConfi
     tenant: cfg.get<string>('tenant') || '',
     githubPat: secretPat,
   };
-}
-
-function readDispatcherConfig(): LmDispatcherConfig {
-  const cfg = vscode.workspace.getConfiguration('agentHubBridge');
-  const systemPrompt = cfg.get<string>('systemPrompt');
-  const vendor = cfg.get<string>('languageModel.vendor') || 'copilot';
-  const family = cfg.get<string>('languageModel.family') || '';
-  // Drop empty-string fields from the selector so VS Code's matcher
-  // doesn't try to look for a model literally named "".
-  const selector: vscode.LanguageModelChatSelector = { vendor };
-  if (family.length > 0) {
-    selector.family = family;
-  }
-  return {
-    systemPrompt:
-      typeof systemPrompt === 'string' && systemPrompt.trim().length > 0
-        ? systemPrompt
-        : DEFAULT_SYSTEM_PROMPT,
-    modelSelector: selector,
-    justification: DEFAULT_JUSTIFICATION,
-    ideContext: readIdeContextOptions(cfg),
-  };
-}
-
-function readIdeContextOptions(
-  cfg: vscode.WorkspaceConfiguration
-): IdeContextOptions {
-  // Honour user overrides but always fall back to the documented defaults
-  // for unset / malformed values so a corrupt settings.json never silently
-  // disables context attach. Numeric keys are floored to non-negative.
-  const enabled = cfg.get<boolean>('ideContext.enabled');
-  const maxSelChars = cfg.get<number>('ideContext.maxSelectionChars');
-  const maxDiag = cfg.get<number>('ideContext.maxDiagnostics');
-  const windowLines = cfg.get<number>('ideContext.windowLinesAroundCursor');
-  const gitEnabled = cfg.get<boolean>('ideContext.gitDiff.enabled');
-  const gitMaxFiles = cfg.get<number>('ideContext.gitDiff.maxFiles');
-  const gitMaxCharsPerFile = cfg.get<number>('ideContext.gitDiff.maxCharsPerFile');
-  const gitIncludeUntracked = cfg.get<boolean>('ideContext.gitDiff.includeUntracked');
-  const maxSecondaryEditors = cfg.get<number>('ideContext.multiEditor.maxSecondaryEditors');
-  const notebookEnabled = cfg.get<boolean>('ideContext.notebook.enabled');
-  return {
-    enabled: typeof enabled === 'boolean' ? enabled : DEFAULT_IDE_CONTEXT_OPTIONS.enabled,
-    maxSelectionChars: nonNegativeInt(
-      maxSelChars,
-      DEFAULT_IDE_CONTEXT_OPTIONS.maxSelectionChars
-    ),
-    maxDiagnostics: nonNegativeInt(maxDiag, DEFAULT_IDE_CONTEXT_OPTIONS.maxDiagnostics),
-    windowLinesAroundCursor: nonNegativeInt(
-      windowLines,
-      DEFAULT_IDE_CONTEXT_OPTIONS.windowLinesAroundCursor
-    ),
-    gitDiff: {
-      enabled:
-        typeof gitEnabled === 'boolean'
-          ? gitEnabled
-          : DEFAULT_IDE_CONTEXT_OPTIONS.gitDiff.enabled,
-      maxFiles: nonNegativeInt(
-        gitMaxFiles,
-        DEFAULT_IDE_CONTEXT_OPTIONS.gitDiff.maxFiles
-      ),
-      maxCharsPerFile: nonNegativeInt(
-        gitMaxCharsPerFile,
-        DEFAULT_IDE_CONTEXT_OPTIONS.gitDiff.maxCharsPerFile
-      ),
-      includeUntracked:
-        typeof gitIncludeUntracked === 'boolean'
-          ? gitIncludeUntracked
-          : DEFAULT_IDE_CONTEXT_OPTIONS.gitDiff.includeUntracked,
-    },
-    multiEditor: {
-      maxSecondaryEditors: nonNegativeInt(
-        maxSecondaryEditors,
-        DEFAULT_IDE_CONTEXT_OPTIONS.multiEditor.maxSecondaryEditors
-      ),
-    },
-    notebook: {
-      enabled:
-        typeof notebookEnabled === 'boolean'
-          ? notebookEnabled
-          : DEFAULT_IDE_CONTEXT_OPTIONS.notebook.enabled,
-    },
-  };
-}
-
-function nonNegativeInt(value: unknown, fallback: number): number {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
-    return fallback;
-  }
-  return Math.floor(value);
 }
 
 async function startWatcher(context: vscode.ExtensionContext): Promise<void> {
@@ -186,7 +84,7 @@ async function startWatcher(context: vscode.ExtensionContext): Promise<void> {
   }
 
   const w = new InboxWatcher(config, log);
-  const d = new LmDispatcher({ watcher: w, cfg: readDispatcherConfig(), log, sentPeers });
+  const d = new LmDispatcher({ watcher: w, log });
   // Subscribe before start() so we never miss the first event the watcher
   // emits after subscribe returns. The dispatcher's onInboxNotification
   // requestDrain()s, which then fetches *all* unread messages — so even if
@@ -376,15 +274,11 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   // Register the @agent-hub Copilot Chat participant (issue #28).
-  // sentPeers is shared with LmDispatcher so Chat-originated DM replies
-  // are intercepted (VS Code notification) instead of being routed through the LM
-  // (issue #32).
   registerChatParticipant(
     context,
     () => watcher,
     () => startWatcher(context),
-    log,
-    sentPeers
+    log
   );
 }
 
