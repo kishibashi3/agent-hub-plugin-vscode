@@ -33,3 +33,27 @@ export function parsePrompt(prompt: string): { to: string; body: string } | null
   if (!body) return null;
   return { to: match[1] as string, body };
 }
+
+/**
+ * Extract a leading `@handle` (and optional trailing body) from a prompt.
+ *
+ * Unlike `parsePrompt`, the body is allowed to be absent.
+ * Used by the Chat-panel participant picker (issue #47): when the user
+ * types `@agent-hub @reviewer` (handle present, body absent) we can skip
+ * the participant QuickPick and jump straight to the InputBox for the body.
+ *
+ * Returns `{ handle, body }` when the prompt starts with `@word`.
+ * `body` is the trimmed text after the handle (may be empty string `""`).
+ * Returns `null` when the prompt is empty or does not start with `@word`.
+ *
+ * Exported for unit testing in `tests/chatParticipantCore.test.ts`.
+ */
+export function parseHandle(prompt: string): { handle: string; body: string } | null {
+  // Match an optional @word followed by optional trailing text.
+  const match = prompt.trim().match(/^(@\S+)(?:\s+([\s\S]+))?$/);
+  if (!match) return null;
+  return {
+    handle: match[1] as string,
+    body: (match[2] ?? '').trim(),
+  };
+}
