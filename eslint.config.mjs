@@ -80,7 +80,7 @@ export default tseslint.config(
   //    bound). This rule keeps the pure side pure as a lint-enforced
   //    invariant.
   {
-    files: ['src/protocol.ts', 'src/promptFormat.ts', 'src/chatParticipantCore.ts'],
+    files: ['src/protocol.ts', 'src/promptFormat.ts', 'src/chatParticipantCore.ts', 'src/sentPeers.ts'],
     rules: {
       'no-restricted-imports': [
         'error',
@@ -89,8 +89,8 @@ export default tseslint.config(
             {
               name: 'vscode',
               message:
-                'protocol.ts, promptFormat.ts, and chatParticipantCore.ts must remain ' +
-                'vscode-free (PR #8 split). Move vscode-dependent code into the ' +
+                'protocol.ts, promptFormat.ts, chatParticipantCore.ts, and sentPeers.ts ' +
+                'must remain vscode-free (PR #8 split). Move vscode-dependent code into the ' +
                 'vscode-bound layer (agentHub.ts / ideContext.ts / lmDispatcher.ts / ' +
                 'chatParticipant.ts / extension.ts) and re-export through the existing shims.',
             },

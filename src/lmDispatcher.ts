@@ -25,6 +25,7 @@ import type {
 } from '@kishibashi3/agent-hub-sdk';
 
 import type { InboxMessageNotification, InboxWatcher } from './agentHub';
+import { type SentPeers } from './sentPeers';
 import {
   collectIdeContext,
   EMPTY_IDE_CONTEXT_SNAPSHOT,
@@ -55,6 +56,14 @@ export interface LmDispatcherDeps {
   readonly watcher: InboxWatcher;
   readonly cfg: LmDispatcherConfig;
   readonly log: Logger;
+  /**
+   * Registry of handles the Chat participant has sent DMs to (issue #32).
+   * When set, `dispatchOne` calls `sentPeers.has(msg.sender)` before any
+   * LM work. If the sender is a known contact, the message is ack'd and
+   * shown as a VS Code notification instead of being routed through the
+   * LM. If `undefined`, every message is dispatched autonomously.
+   */
+  readonly sentPeers?: SentPeers;
   /**
    * Injection points for testing — production wiring passes the real
    * `vscode.lm.selectChatModels` and a fresh `CancellationTokenSource`.
@@ -166,6 +175,23 @@ export class LmDispatcher {
     this.deps.log(
       `[dispatch] from=${msg.sender} id=${msg.id}: ${truncate(msg.body, 80)}`
     );
+
+    // ── Sent-peer intercept (issue #32) ─────────────────────────────────
+    // If this message is a reply from a handle the Chat participant has
+    // already DM'd, skip the LM entirely — show the reply as a VS Code
+    // notification and log it to the output channel. This prevents the
+    // bridge from generating an unwanted autonomous reply back to the peer.
+    if (this.deps.sentPeers?.has(msg.sender)) {
+      this.deps.log(
+        `[relay] reply from ${msg.sender} (known contact) — skipping LM, showing notification (msg=${msg.id})`
+      );
+      void vscode.window.showInformationMessage(
+        `agent-hub — ${msg.sender}: ${truncate(msg.body, 120)}`
+      );
+      await this.markRead(msg);
+      return;
+    }
+    // ────────────────────────────────────────────────────────────────────
 
     const model = await this.pickModel();
     if (!model) return; // already logged

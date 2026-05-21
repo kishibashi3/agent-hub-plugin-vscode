@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-05-22
+
+### Added
+- **Chat participant reply intercept ([#32](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/32))** — when the user sends `@agent-hub @<handle> <message>`, the recipient is registered in `SentPeers`. If they reply, `LmDispatcher` skips LM processing and shows the reply as a VS Code info notification instead. Previously the reply landed in the inbox and was mistakenly routed through the LM, generating an unwanted autonomous response.
+- `src/sentPeers.ts` — vscode-free `SentPeers` class (plain `Set<string>` of DM target handles). `LmDispatcher.dispatchOne()` calls `sentPeers.has(msg.sender)` before any LM work; if the sender is a known contact the message is ack'd and surfaced as a notification (no LM invocation).
+- 8 new unit-test assertions for `SentPeers` in `tests/sentPeers.test.ts`.
+- `sentPeers.ts` added to the `no-restricted-imports(vscode)` ESLint rule in `eslint.config.mjs`.
+
+### Changed
+- `chatParticipant.ts` — fire-and-forget: after `session.send()`, calls `sentPeers.add(to)` and immediately shows `✅ Sent to @<handle>`. No async waiting, no timeout loop.
+- `lmDispatcher.ts` — new optional `sentPeers?: SentPeers` dep in `LmDispatcherDeps`. `dispatchOne()` calls `sentPeers.has(msg.sender)` first; known contacts → `showInformationMessage` + `markRead + return` (LM skipped).
+- `extension.ts` — constructs a single shared `SentPeers` instance and threads it into both `LmDispatcher` and `registerChatParticipant`.
+
 ## [0.7.0] — 2026-05-22
 
 ### Fixed
@@ -112,7 +125,8 @@ First feature-complete release. Closes [#1](https://github.com/kishibashi3/agent
 - **`send_message` reply relay** ([#6](https://github.com/kishibashi3/agent-hub-bridge-vscode/pull/6)): replaces the Step 3 `[response]` log path with a real DM relay back to the original sender. `mark_as_read` runs only on successful relay — any failure leaves the message unread for the next drain to retry.
 - **CI** ([#7](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/7) / [#8](https://github.com/kishibashi3/agent-hub-bridge-vscode/pull/8)): GitHub Actions workflow (Node 22 LTS, `npm ci` → typecheck → compile → test), unit-test suite via `node:test` + `tsx` (1 new devDep, no runtime deps). Refactor: pure helpers split into `src/protocol.ts` + `src/promptFormat.ts` so they're require-able without a VS Code shim. 35 unit-test assertions.
 
-[Unreleased]: https://github.com/kishibashi3/agent-hub-bridge-vscode/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/kishibashi3/agent-hub-bridge-vscode/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/kishibashi3/agent-hub-bridge-vscode/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/kishibashi3/agent-hub-bridge-vscode/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/kishibashi3/agent-hub-bridge-vscode/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/kishibashi3/agent-hub-bridge-vscode/releases/tag/v0.5.0
