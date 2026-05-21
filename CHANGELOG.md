@@ -10,16 +10,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.8.0] — 2026-05-22
 
-### Added
-- **Chat participant reply intercept ([#32](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/32))** — when the user sends `@agent-hub @<handle> <message>`, the recipient is registered in `SentPeers`. If they reply, `LmDispatcher` skips LM processing and shows the reply as a VS Code info notification instead. Previously the reply landed in the inbox and was mistakenly routed through the LM, generating an unwanted autonomous response.
-- `src/sentPeers.ts` — vscode-free `SentPeers` class (plain `Set<string>` of DM target handles). `LmDispatcher.dispatchOne()` calls `sentPeers.has(msg.sender)` before any LM work; if the sender is a known contact the message is ack'd and surfaced as a notification (no LM invocation).
-- 8 new unit-test assertions for `SentPeers` in `tests/sentPeers.test.ts`.
-- `sentPeers.ts` added to the `no-restricted-imports(vscode)` ESLint rule in `eslint.config.mjs`.
-
 ### Changed
-- `chatParticipant.ts` — fire-and-forget: after `session.send()`, calls `sentPeers.add(to)` and immediately shows `✅ Sent to @<handle>`. No async waiting, no timeout loop.
-- `lmDispatcher.ts` — new optional `sentPeers?: SentPeers` dep in `LmDispatcherDeps`. `dispatchOne()` calls `sentPeers.has(msg.sender)` first; known contacts → `showInformationMessage` + `markRead + return` (LM skipped).
-- `extension.ts` — constructs a single shared `SentPeers` instance and threads it into both `LmDispatcher` and `registerChatParticipant`.
+- **Remove LM auto-dispatch ([#35](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/35))** — the inbox → LM → auto-reply pipeline has been removed. Inbound DMs are now surfaced as VS Code `showInformationMessage` notifications and logged to the output channel; the bridge no longer generates autonomous replies. Outbound DMs continue to work unchanged via the `@agent-hub` Copilot Chat participant.
+
+### Removed
+- `src/lmDispatcher.ts` — LM invocation, model selection, IDE-context collection, and prompt formatting logic. The file now contains only the drain-loop skeleton (`requestDrain` / `drainLoop` / `drainOnce`) plus the new `notifyOne` sink.
+- `src/ideContext.ts` — IDE-context capture (active editor, selection, cursor-window, diagnostics, git diff, multi-editor, notebook). No longer needed.
+- `src/promptFormat.ts` — `formatPrompt` / `formatIdeContext` / `formatGitDiffBlock` and related helpers. No longer needed.
+- `src/vscodeGit.d.ts` — local typings for the `vscode.git` extension API. No longer needed.
+- `tests/promptFormat.test.ts` — unit tests for the removed prompt-format helpers.
+- `agentHubBridge.systemPrompt`, `agentHubBridge.languageModel.*`, and `agentHubBridge.ideContext.*` settings from `package.json` — no longer applicable.
 
 ## [0.7.0] — 2026-05-22
 

@@ -3,7 +3,7 @@
 // Scope:
 //   - typescript-eslint recommendedTypeChecked rule set across src/ + tests/
 //   - One custom rule: `no-restricted-imports` enforces the vscode-free
-//     split (PR #8) — `protocol.ts` and `promptFormat.ts` must never
+//     split (PR #8) — `protocol.ts` and `chatParticipantCore.ts` must never
 //     `import * as vscode from 'vscode'`. Lifting this from convention to
 //     lint-enforced invariant is the main marginal value over `tsc --strict`.
 //
@@ -74,13 +74,11 @@ export default tseslint.config(
     },
   },
 
-  // 4. Vscode-free-module enforcement — PR #8 layered the bridge as
-  //    `protocol.ts` / `promptFormat.ts` (pure, no vscode) re-exported
-  //    by `agentHub.ts` / `ideContext.ts` / `lmDispatcher.ts` (vscode-
-  //    bound). This rule keeps the pure side pure as a lint-enforced
-  //    invariant.
+  // 4. Vscode-free-module enforcement — `protocol.ts` and
+  //    `chatParticipantCore.ts` are pure Node modules (no vscode import).
+  //    This rule keeps the pure side pure as a lint-enforced invariant.
   {
-    files: ['src/protocol.ts', 'src/promptFormat.ts', 'src/chatParticipantCore.ts', 'src/sentPeers.ts'],
+    files: ['src/protocol.ts', 'src/chatParticipantCore.ts'],
     rules: {
       'no-restricted-imports': [
         'error',
@@ -89,10 +87,9 @@ export default tseslint.config(
             {
               name: 'vscode',
               message:
-                'protocol.ts, promptFormat.ts, chatParticipantCore.ts, and sentPeers.ts ' +
-                'must remain vscode-free (PR #8 split). Move vscode-dependent code into the ' +
-                'vscode-bound layer (agentHub.ts / ideContext.ts / lmDispatcher.ts / ' +
-                'chatParticipant.ts / extension.ts) and re-export through the existing shims.',
+                'protocol.ts and chatParticipantCore.ts must remain vscode-free (PR #8 split). ' +
+                'Move vscode-dependent code into the vscode-bound layer (agentHub.ts / ' +
+                'lmDispatcher.ts / chatParticipant.ts / extension.ts).',
             },
           ],
         },
