@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `agentHubBridge.ideContext` setting — controls injection policy: `"selection-only"` (default, appends only when text is selected), `"always"` (always append file + cursor info), `"off"` (disable).
 - `src/ideContextCore.ts` — vscode-free `IdeContext` interface, `formatIdeContext()`, and `appendIdeContext()` helpers. Added to ESLint vscode-free rule.
 - `src/ideContext.ts` — vscode-bound `gatherIdeContext(mode)` that reads `vscode.window.activeTextEditor`.
-- `tests/ideContext.test.ts` — 8 unit tests for `formatIdeContext` and `appendIdeContext`.
+- `tests/ideContextCore.test.ts` — 11 unit tests for `formatIdeContext` and `appendIdeContext`.
 - Chat panel confirmation now shows `_(+ 📎 file.ts L10)_` when context is injected.
 
 ## [0.11.1] — 2026-05-22

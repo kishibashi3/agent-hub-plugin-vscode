@@ -235,7 +235,11 @@ export function registerChatParticipant(
       const ideCtx = gatherIdeContext(ideMode);
       const enrichedBody = appendIdeContext(body, ideCtx);
       if (ideCtx) {
-        log(`[ide] context appended: ${ideCtx.file} L${ideCtx.startLine}–${ideCtx.endLine}`);
+        const locLabel =
+          ideCtx.startLine === ideCtx.endLine
+            ? `L${ideCtx.startLine}`
+            : `L${ideCtx.startLine}–${ideCtx.endLine}`;
+        log(`[ide] context appended: ${ideCtx.file} ${locLabel}`);
       }
 
       // ── Send + relay wait ─────────────────────────────────────────────
