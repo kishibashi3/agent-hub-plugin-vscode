@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-05-22
+
+### Added
+- **Chat-panel reply relay ([#45](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/45))** — after `@agent-hub @<handle> <message>` sends a DM, the Chat panel now awaits the recipient's reply (up to 60 s) and streams it back inline. Previously the reply arrived as a separate VS Code notification. On timeout, "⏱ No reply within 60s" is shown. No LM is invoked.
+- `src/relayTracker.ts` — vscode-free `RelayTracker` class: `waitFor(sender, timeoutMs)` registers a FIFO waiter; `tryResolve(msg)` resolves the first matching waiter. `RelayTimeout` error class for expired waiters.
+- 8 new unit-test assertions for `RelayTracker` in `tests/relayTracker.test.ts`.
+- `relayTracker.ts` added to the `no-restricted-imports(vscode)` ESLint rule in `eslint.config.mjs`.
+
+### Changed
+- `src/lmDispatcher.ts` — `notifyOne()` now calls `relayTracker.tryResolve(msg)` first; messages consumed by the relay waiter are ack'd without a VS Code notification.
+- `src/chatParticipant.ts` — `registerChatParticipant` gains a `relayTracker` parameter; after `session.send()`, registers a relay wait and streams the reply (or timeout message) into the Chat response.
+- `src/extension.ts` — creates a module-level `RelayTracker` singleton and threads it into both `LmDispatcher` and `registerChatParticipant`.
+
 ## [0.8.0] — 2026-05-22
 
 ### Changed

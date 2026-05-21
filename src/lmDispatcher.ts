@@ -16,12 +16,19 @@ import type {
 } from '@kishibashi3/agent-hub-sdk';
 
 import type { InboxMessageNotification, InboxWatcher } from './agentHub';
+import type { RelayTracker } from './relayTracker';
 
 type Logger = (msg: string) => void;
 
 export interface LmDispatcherDeps {
   readonly watcher: InboxWatcher;
   readonly log: Logger;
+  /**
+   * Optional relay tracker — when set, `notifyOne` calls `tryResolve` first.
+   * If the message belongs to a pending Chat-panel waiter, it is handed off
+   * there instead of being shown as a VS Code notification.
+   */
+  readonly relayTracker?: RelayTracker;
 }
 
 function truncate(text: string, max: number): string {
@@ -101,6 +108,16 @@ export class LmDispatcher {
     this.deps.log(
       `[inbox] from=${msg.sender} id=${msg.id}: ${truncate(msg.body, 80)}`
     );
+
+    // Chat-relay intercept (issue #45): if the Chat participant is awaiting a
+    // reply from this sender, hand the message to the relay waiter so it
+    // appears in the Chat panel instead of as a VS Code notification.
+    if (this.deps.relayTracker?.tryResolve(msg)) {
+      this.deps.log(`[relay] resolved Chat waiter for ${msg.sender} (msg=${msg.id})`);
+      await this.markRead(msg);
+      return;
+    }
+
     void vscode.window.showInformationMessage(
       `agent-hub \u2014 ${msg.sender}: ${truncate(msg.body, 120)}`
     );

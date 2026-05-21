@@ -1,4 +1,4 @@
-// Copilot Chat participant — `@agent-hub` (issue #28).
+// Copilot Chat participant — `@agent-hub` (issue #28, #45).
 //
 // Registers a VS Code Chat participant so users can send DMs to
 // agent-hub participants directly from the Copilot Chat panel:
@@ -6,12 +6,15 @@
 //   @agent-hub @planner 今日のタスクは？
 //   @agent-hub @team-backend デプロイ状況を確認して
 //
-// Flow (Option A — fire-and-forget):
+// Flow (relay mode — issue #45):
 //   1. Parse `@<handle> <body>` from request.prompt.
 //   2. If no active session, call autoStart() to start inbox watch.
-//   3. Call session.send(to, body).
-//   4. Report "sent ✅" in the chat response stream.
-//      The reply (if any) arrives via the normal inbox watch flow.
+//   3. Call session.send(to, body) and register a relay waiter.
+//   4. Await the reply in the Chat panel (up to RELAY_TIMEOUT_MS).
+//      - Reply arrives → streamed to the Chat panel.
+//      - Timeout → "⏱ No reply within 60s" shown in the Chat panel.
+//      - User cancels → wait exits silently.
+//   No LM is invoked at any point.
 //
 // This module is vscode-bound (imports vscode) so it lives in the
 // vscode-bound layer alongside agentHub.ts / lmDispatcher.ts.
@@ -24,6 +27,10 @@ import type { InboxWatcher } from './agentHub';
 // Re-exported here for call sites that `import { parsePrompt } from './chatParticipant'`.
 export { parsePrompt } from './chatParticipantCore';
 import { parsePrompt } from './chatParticipantCore';
+import { RelayTimeout, type RelayTracker } from './relayTracker';
+
+/** Wall-clock budget for awaiting a reply in the Chat panel (ms). */
+export const RELAY_TIMEOUT_MS = 60_000;
 
 export const CHAT_PARTICIPANT_ID = 'agent-hub.participant';
 
@@ -39,18 +46,22 @@ const USAGE_MARKDOWN = [
 /**
  * Register the `@agent-hub` Copilot Chat participant.
  *
- * @param context    Extension context — participant is added to subscriptions.
- * @param getWatcher Returns the currently-active `InboxWatcher` (or undefined).
- *                   Checked on each request so reconnects are transparent.
- * @param autoStart  Called when no session is active; starts inbox watch.
- *                   Must resolve after the watcher session is usable.
- * @param log        Output-channel logger (same as extension.ts `log`).
+ * @param context      Extension context — participant is added to subscriptions.
+ * @param getWatcher   Returns the currently-active `InboxWatcher` (or undefined).
+ *                     Checked on each request so reconnects are transparent.
+ * @param autoStart    Called when no session is active; starts inbox watch.
+ *                     Must resolve after the watcher session is usable.
+ * @param log          Output-channel logger (same as extension.ts `log`).
+ * @param relayTracker Shared waiter map — after a successful send, a waiter is
+ *                     registered here. The inbox drain resolves it when the
+ *                     reply arrives, bypassing the VS Code notification path.
  */
 export function registerChatParticipant(
   context: vscode.ExtensionContext,
   getWatcher: () => InboxWatcher | undefined,
   autoStart: () => Promise<void>,
-  log: (msg: string) => void
+  log: (msg: string) => void,
+  relayTracker: RelayTracker
 ): void {
   const participant = vscode.chat.createChatParticipant(
     CHAT_PARTICIPANT_ID,
@@ -85,15 +96,41 @@ export function registerChatParticipant(
         return;
       }
 
-      // ── Send ─────────────────────────────────────────────────────────
+      // ── Send + relay wait ─────────────────────────────────────────────
       try {
         await session.send(to, body);
         log(`[chat] sent to ${to}`);
-        response.markdown(`✅ Sent to **${to}**\n\n> ${body}`);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         log(`[chat] send error to ${to}: ${msg}`);
         response.markdown(`❌ Failed to send to **${to}**: ${msg}`);
+        return;
+      }
+
+      response.markdown(`✅ Sent to **${to}**\n\n> ${body}\n\n⏳ Waiting for reply…`);
+
+      // Race the relay wait against user cancellation so the Chat panel
+      // doesn't hang indefinitely when the user hits Escape.
+      const cancelPromise = new Promise<never>((_, reject) =>
+        token.onCancellationRequested(() => reject(new Error('cancelled')))
+      );
+      try {
+        const reply = await Promise.race([
+          relayTracker.waitFor(to, RELAY_TIMEOUT_MS),
+          cancelPromise,
+        ]);
+        log(`[chat] relay received from ${to} (msg=${reply.id})`);
+        response.markdown(`\n\n**${to}**: ${reply.body}`);
+      } catch (err) {
+        if (err instanceof RelayTimeout) {
+          log(`[chat] relay timeout waiting for reply from ${to}`);
+          response.markdown(`\n\n⏱ No reply within ${Math.round(RELAY_TIMEOUT_MS / 1000)}s.`);
+        } else {
+          // Cancellation (or unexpected error) — remove the waiter from the map
+          // so any reply that arrives before the 60s timer fires is routed to a
+          // VS Code notification instead of being silently consumed (issue #45).
+          relayTracker.cancel(to);
+        }
       }
     }
   );
