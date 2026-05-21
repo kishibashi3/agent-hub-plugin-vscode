@@ -5,6 +5,37 @@
 //
 // Keep this module vscode-free — no `import … from 'vscode'` allowed.
 
+/** SecretStorage key for the GitHub PAT (mirrors the constant in extension.ts). */
+export const GITHUB_PAT_SECRET_KEY = 'agentHubBridge.githubPat';
+
+/** VS Code configuration keys whose change requires MCP server re-registration. */
+export const MCP_RELOAD_CONFIG_KEYS = [
+  'agentHubBridge.url',
+  'agentHubBridge.user',
+  'agentHubBridge.tenant',
+] as const;
+
+/**
+ * Returns true if any key in `MCP_RELOAD_CONFIG_KEYS` matches the changed
+ * configuration event, meaning VS Code should re-resolve the MCP server definition.
+ *
+ * @param affectsConfiguration — `(key: string) => boolean` predicate taken
+ *   directly from `vscode.ConfigurationChangeEvent.affectsConfiguration`.
+ */
+export function requiresMcpReload(affectsConfiguration: (key: string) => boolean): boolean {
+  return MCP_RELOAD_CONFIG_KEYS.some((key) => affectsConfiguration(key));
+}
+
+/**
+ * Returns true when the changed secret key is the GitHub PAT, meaning VS
+ * Code should re-resolve the MCP server definition (auth headers may change).
+ *
+ * @param changedKey — `vscode.SecretStorageChangeEvent.key`
+ */
+export function requiresMcpReloadOnSecretChange(changedKey: string): boolean {
+  return changedKey === GITHUB_PAT_SECRET_KEY;
+}
+
 /**
  * Build the HTTP auth headers for an agent-hub MCP connection.
  *

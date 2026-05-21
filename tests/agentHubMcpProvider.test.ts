@@ -1,13 +1,20 @@
 // Unit tests for agentHubMcpProviderCore helpers (issue #53).
 //
-// `buildAuthHeaders` is extracted to a vscode-free module so the auth-header
-// priority logic can be tested without a VS Code extension-host shim.
-// The vscode-bound wiring (AgentHubMcpProvider class, event listeners) is
-// covered by integration/manual testing only.
+// The three helpers (`buildAuthHeaders`, `requiresMcpReload`,
+// `requiresMcpReloadOnSecretChange`) are extracted to a vscode-free module so
+// the auth-header priority logic and the event-fire conditions can be tested
+// without a VS Code extension-host shim.
+// The vscode-bound wiring (AgentHubMcpProvider class constructor, VS Code
+// EventEmitter) is covered by integration/manual testing only.
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildAuthHeaders } from '../src/agentHubMcpProviderCore';
+import {
+  buildAuthHeaders,
+  GITHUB_PAT_SECRET_KEY,
+  requiresMcpReload,
+  requiresMcpReloadOnSecretChange,
+} from '../src/agentHubMcpProviderCore';
 
 describe('buildAuthHeaders', () => {
   // ── PAT mode ───────────────────────────────────────────────────────────────
@@ -69,5 +76,47 @@ describe('buildAuthHeaders', () => {
     const h = buildAuthHeaders('ghp_abc', '@user', 'tenant');
     // Only Authorization + X-Tenant-Id (user ignored because PAT wins)
     assert.deepEqual(Object.keys(h).sort(), ['Authorization', 'X-Tenant-Id'].sort());
+  });
+});
+
+// ── requiresMcpReload ─────────────────────────────────────────────────────────
+// Covers path 5: config change → event fire condition.
+
+describe('requiresMcpReload', () => {
+  it('returns true when agentHubBridge.url changes', () => {
+    assert.equal(requiresMcpReload((key) => key === 'agentHubBridge.url'), true);
+  });
+
+  it('returns true when agentHubBridge.user changes', () => {
+    assert.equal(requiresMcpReload((key) => key === 'agentHubBridge.user'), true);
+  });
+
+  it('returns true when agentHubBridge.tenant changes', () => {
+    assert.equal(requiresMcpReload((key) => key === 'agentHubBridge.tenant'), true);
+  });
+
+  it('returns false for an unrelated config key', () => {
+    assert.equal(requiresMcpReload((key) => key === 'editor.fontSize'), false);
+  });
+
+  it('returns false when the predicate always returns false', () => {
+    assert.equal(requiresMcpReload(() => false), false);
+  });
+});
+
+// ── requiresMcpReloadOnSecretChange ───────────────────────────────────────────
+// Covers path 6: secret (GitHub PAT) change → event fire condition.
+
+describe('requiresMcpReloadOnSecretChange', () => {
+  it('returns true for the GitHub PAT secret key', () => {
+    assert.equal(requiresMcpReloadOnSecretChange(GITHUB_PAT_SECRET_KEY), true);
+  });
+
+  it('returns false for an unrelated secret key', () => {
+    assert.equal(requiresMcpReloadOnSecretChange('some.other.secret'), false);
+  });
+
+  it('GITHUB_PAT_SECRET_KEY constant equals the expected key', () => {
+    assert.equal(GITHUB_PAT_SECRET_KEY, 'agentHubBridge.githubPat');
   });
 });

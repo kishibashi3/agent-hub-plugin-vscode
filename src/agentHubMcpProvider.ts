@@ -14,9 +14,12 @@
 
 import * as vscode from 'vscode';
 
-import { buildAuthHeaders } from './agentHubMcpProviderCore';
-
-const SECRET_KEY_GITHUB_PAT = 'agentHubBridge.githubPat';
+import {
+  buildAuthHeaders,
+  GITHUB_PAT_SECRET_KEY,
+  requiresMcpReload,
+  requiresMcpReloadOnSecretChange,
+} from './agentHubMcpProviderCore';
 
 /** Provider ID — must match the `id` declared in `contributes.mcpServerDefinitionProviders`. */
 export const MCP_PROVIDER_ID = 'agent-hub';
@@ -40,22 +43,20 @@ export class AgentHubMcpProvider
 
   constructor(private readonly context: vscode.ExtensionContext) {
     // Re-register when URL / user / tenant settings change.
+    // `requiresMcpReload` is extracted to the vscode-free core so it is unit-testable.
     context.subscriptions.push(
       vscode.workspace.onDidChangeConfiguration((e) => {
-        if (
-          e.affectsConfiguration('agentHubBridge.url') ||
-          e.affectsConfiguration('agentHubBridge.user') ||
-          e.affectsConfiguration('agentHubBridge.tenant')
-        ) {
+        if (requiresMcpReload((key) => e.affectsConfiguration(key))) {
           this._changeEmitter.fire();
         }
       })
     );
 
     // Re-register when the stored GitHub PAT is added / removed.
+    // `requiresMcpReloadOnSecretChange` is extracted to the vscode-free core.
     context.subscriptions.push(
       context.secrets.onDidChange((e) => {
-        if (e.key === SECRET_KEY_GITHUB_PAT) {
+        if (requiresMcpReloadOnSecretChange(e.key)) {
           this._changeEmitter.fire();
         }
       })
@@ -90,7 +91,7 @@ export class AgentHubMcpProvider
     const cfg = vscode.workspace.getConfiguration('agentHubBridge');
     const user = (cfg.get<string>('user') ?? '').trim();
     const tenant = (cfg.get<string>('tenant') ?? '').trim();
-    const pat = ((await this.context.secrets.get(SECRET_KEY_GITHUB_PAT)) ?? '').trim();
+    const pat = ((await this.context.secrets.get(GITHUB_PAT_SECRET_KEY)) ?? '').trim();
 
     // Auth header logic lives in the vscode-free `./agentHubMcpProviderCore`
     // module so it can be unit-tested without a VS Code extension-host shim.
