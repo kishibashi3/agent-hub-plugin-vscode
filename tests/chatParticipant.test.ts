@@ -154,3 +154,4 @@ describe('extractPickerBody', () => {
     assert.equal(extractPickerBody('@@   hello   '), 'hello');
   });
 });
+

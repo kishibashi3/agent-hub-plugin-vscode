@@ -34,6 +34,7 @@ import type { InboxWatcher } from './agentHub';
 export { parsePrompt, parseHandle, isPickerTrigger, PICKER_TRIGGER } from './chatParticipantCore';
 import { extractPickerBody, isPickerTrigger, parseHandle, parsePrompt } from './chatParticipantCore';
 import { RelayTimeout, type RelayTracker } from './relayTracker';
+import { updateStickyHandle, type StickyHandleRef } from './stickyHandle';
 
 /** Wall-clock budget for awaiting a reply in the Chat panel (ms). */
 export const RELAY_TIMEOUT_MS = 60_000;
@@ -72,7 +73,7 @@ export function registerChatParticipant(
   autoStart: () => Promise<void>,
   log: (msg: string) => void,
   relayTracker: RelayTracker,
-  stickyHandle: { value: string | undefined }
+  stickyHandle: StickyHandleRef
 ): void {
 
   const participant = vscode.chat.createChatParticipant(
@@ -225,7 +226,8 @@ export function registerChatParticipant(
       try {
         await session.send(to, body);
         // Update sticky handle only after a successful send (issue #47 Minor #1).
-        stickyHandle.value = to;
+        // updateStickyHandle() lives in the vscode-free `./stickyHandle` module.
+        updateStickyHandle(stickyHandle, to);
         log(`[chat] sent to ${to}`);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
