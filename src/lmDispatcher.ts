@@ -17,6 +17,8 @@ import type {
 
 import type { InboxMessageNotification, InboxWatcher } from './agentHub';
 import type { RelayTracker } from './relayTracker';
+import { updateStickyHandle } from './stickyHandle';
+import type { StickyHandleRef } from './stickyHandle';
 
 type Logger = (msg: string) => void;
 
@@ -30,11 +32,12 @@ export interface LmDispatcherDeps {
    */
   readonly relayTracker?: RelayTracker;
   /**
-   * Shared sticky-handle reference (issue #50). When set, `notifyOne` writes
-   * `msg.sender` here so that the Chat participant auto-addresses future
+   * Shared sticky-handle reference (issue #50). When set, `notifyOne` calls
+   * `updateStickyHandle()` so that the Chat participant auto-addresses future
    * bare `@agent-hub` messages to the most recent DM sender.
+   * The actual mutation logic lives in the vscode-free `./stickyHandle` module.
    */
-  readonly stickyHandle?: { value: string | undefined };
+  readonly stickyHandle?: StickyHandleRef;
 }
 
 function truncate(text: string, max: number): string {
@@ -115,13 +118,13 @@ export class LmDispatcher {
       `[inbox] from=${msg.sender} id=${msg.id}: ${truncate(msg.body, 80)}`
     );
 
-    // Sticky-handle update (issue #50): update on every received DM so the
-    // Chat participant auto-addresses the next bare `@agent-hub` message to
-    // the most recent sender. Runs before relay/notification so the handle
-    // is always fresh regardless of which path handles the message.
+    // Sticky-handle update (issue #50 / #52): update on every received DM so
+    // the Chat participant auto-addresses the next bare `@agent-hub` message
+    // to the most recent sender. updateStickyHandle() lives in the vscode-free
+    // `./stickyHandle` module so the logic can be unit-tested without a shim.
     if (this.deps.stickyHandle) {
-      this.deps.stickyHandle.value = msg.sender;
-      this.deps.log(`[sticky] lastHandle \u2192 ${msg.sender}`);
+      const changed = updateStickyHandle(this.deps.stickyHandle, msg.sender);
+      if (changed) this.deps.log(`[sticky] lastHandle \u2192 ${msg.sender}`);
     }
 
     // Chat-relay intercept (issue #45): if the Chat participant is awaiting a
