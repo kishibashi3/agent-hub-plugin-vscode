@@ -89,4 +89,32 @@ describe('RelayTracker', () => {
     await aliceWait;
     assert.equal(tracker.tryResolve(msg('alice')), false);
   });
+
+  // cancel() — public method used by chatParticipant when the Chat turn is
+  // cancelled (Escape) to prevent message loss (issue #45 Minor #1).
+  it('cancel removes the waiter so tryResolve falls through to notification path', () => {
+    const tracker = new RelayTracker();
+    void tracker.waitFor('alice', 5_000); // waiter registered but never awaited
+    tracker.cancel('alice');
+    // tryResolve must now return false — reply routes to VS Code notification.
+    assert.equal(tracker.tryResolve(msg('alice', 'late reply')), false);
+    tracker.dispose();
+  });
+
+  it('cancel is a no-op when no waiter is registered', () => {
+    const tracker = new RelayTracker();
+    assert.doesNotThrow(() => tracker.cancel('alice'));
+    tracker.dispose();
+  });
+
+  it('cancel does not affect waiters for other senders', () => {
+    const tracker = new RelayTracker();
+    void tracker.waitFor('alice', 5_000);
+    const bobPromise = tracker.waitFor('bob', 5_000);
+    tracker.cancel('alice');
+    // bob's waiter is still intact
+    assert.equal(tracker.tryResolve(msg('bob', 'bob reply')), true);
+    void bobPromise; // consumed by tryResolve above
+    tracker.dispose();
+  });
 });
