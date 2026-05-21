@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-05-22
+
+### Added
+- **IDE context injection into relay DMs ([#48](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/48))** — when sending a DM via `@agent-hub`, the active editor's file path and selection (or cursor position) are automatically appended to the DM body, so peers can see the code context immediately.
+- `agentHubBridge.ideContext` setting — controls injection policy: `"selection-only"` (default, appends only when text is selected), `"always"` (always append file + cursor info), `"off"` (disable).
+- `src/ideContextCore.ts` — vscode-free `IdeContext` interface, `formatIdeContext()`, and `appendIdeContext()` helpers. Added to ESLint vscode-free rule.
+- `src/ideContext.ts` — vscode-bound `gatherIdeContext(mode)` that reads `vscode.window.activeTextEditor`.
+- `tests/ideContextCore.test.ts` — 11 unit tests for `formatIdeContext` and `appendIdeContext`.
+- Chat panel confirmation now shows `_(+ 📎 file.ts L10)_` when context is injected.
+
 ## [0.11.1] — 2026-05-22
 
 ### Changed
