@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-05-22
+
+### Added
+- **Copilot MCP participant ([#53](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/53))** — the extension now registers the agent-hub MCP endpoint with VS Code 1.99+ so Copilot (and other MCP clients) can call agent-hub tools (`send_message`, `get_participants`, `get_messages`, …) directly via natural-language requests without routing through the Chat participant handler.
+- `src/agentHubMcpProvider.ts` — `AgentHubMcpProvider` implements `McpServerDefinitionProvider<McpHttpServerDefinition>`. `provideMcpServerDefinitions` returns the configured URL; `resolveMcpServerDefinition` injects auth headers (PAT → `Authorization: Bearer`, trust mode → `X-Forwarded-User`, tenant → `X-Tenant-Id`). Fires `onDidChangeMcpServerDefinitions` on config / secret changes.
+- `contributes.mcpServerDefinitionProviders` declared in `package.json` (id: `"agent-hub"`).
+
+### Changed
+- Minimum VS Code engine bumped to `^1.99.0` (required for `McpHttpServerDefinition` / `registerMcpServerDefinitionProvider` API).
+- `src/extension.ts` — registers `AgentHubMcpProvider` in `activate()` alongside the existing Chat participant and SSE inbox watch (both paths remain fully functional).
+
 ## [0.12.0] — 2026-05-22
 
 ### Added
