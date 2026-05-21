@@ -2,7 +2,7 @@
   "name": "agent-hub-bridge-vscode",
   "displayName": "agent-hub bridge (VS Code)",
   "description": "VS Code extension that connects to agent-hub: watch your inbox as notifications and send DMs via the @agent-hub Copilot Chat participant.",
-  "version": "0.11.1",
+  "version": "0.12.0",
   "publisher": "kishibashi3",
   "private": true,
   "license": "MIT",
@@ -73,6 +73,12 @@
           "type": "string",
           "default": "",
           "description": "Default DM recipient when no @handle is given and no sticky handle is set (e.g. @planner). Leave blank to use sticky handle or show usage hint. Type @@ to open the participant picker."
+        },
+        "agentHubBridge.ideContext": {
+          "type": "string",
+          "enum": ["selection-only", "always", "off"],
+          "default": "selection-only",
+          "description": "Controls when the active editor context (file path + selection) is appended to outgoing DMs. \"selection-only\" (default): append only when text is selected. \"always\": always append file + cursor position. \"off\": never append."
         }
       }
     }

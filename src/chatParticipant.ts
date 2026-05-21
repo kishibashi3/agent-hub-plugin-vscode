@@ -33,6 +33,8 @@ import type { InboxWatcher } from './agentHub';
 // Re-exported here for call sites that `import { parsePrompt } from './chatParticipant'`.
 export { parsePrompt, parseHandle, isPickerTrigger, PICKER_TRIGGER } from './chatParticipantCore';
 import { extractPickerBody, isPickerTrigger, parseHandle, parsePrompt } from './chatParticipantCore';
+import { gatherIdeContext, type IdeContextMode } from './ideContext';
+import { appendIdeContext } from './ideContextCore';
 import { RelayTimeout, type RelayTracker } from './relayTracker';
 import { updateStickyHandle, type StickyHandleRef } from './stickyHandle';
 
@@ -222,9 +224,23 @@ export function registerChatParticipant(
         }
       }
 
+      // ── IDE context injection (issue #48) ────────────────────────────
+      // Append active-editor context (file path, selection) to the DM body
+      // when the user has configured it. The enriched body is sent to the
+      // peer; the Chat panel response shows only the original message to
+      // avoid repeating the code block in the UI.
+      const ideMode = vscode.workspace
+        .getConfiguration('agentHubBridge')
+        .get<IdeContextMode>('ideContext') ?? 'selection-only';
+      const ideCtx = gatherIdeContext(ideMode);
+      const enrichedBody = appendIdeContext(body, ideCtx);
+      if (ideCtx) {
+        log(`[ide] context appended: ${ideCtx.file} L${ideCtx.startLine}–${ideCtx.endLine}`);
+      }
+
       // ── Send + relay wait ─────────────────────────────────────────────
       try {
-        await session.send(to, body);
+        await session.send(to, enrichedBody);
         // Update sticky handle only after a successful send (issue #47 Minor #1).
         // updateStickyHandle() lives in the vscode-free `./stickyHandle` module.
         updateStickyHandle(stickyHandle, to);
@@ -236,7 +252,10 @@ export function registerChatParticipant(
         return;
       }
 
-      response.markdown(`✅ Sent to **${to}**\n\n> ${body}\n\n⏳ Waiting for reply…`);
+      const ctxNote = ideCtx
+        ? ` _(+ 📎 ${ideCtx.file} L${ideCtx.startLine}${ideCtx.startLine !== ideCtx.endLine ? `–${ideCtx.endLine}` : ''})_`
+        : '';
+      response.markdown(`✅ Sent to **${to}**${ctxNote}\n\n> ${body}\n\n⏳ Waiting for reply…`);
 
       // Race the relay wait against user cancellation.
       const cancelPromise = new Promise<never>((_, reject) =>
