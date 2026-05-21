@@ -7,12 +7,14 @@
 //
 // Authentication is injected in `resolveMcpServerDefinition`:
 //   - PAT mode  : `Authorization: Bearer <pat>` (PAT from SecretStorage)
-//   - Trust mode: `X-Forwarded-User: <user>`    (user from settings)
+//   - Trust mode: `X-User-Id: <user>`           (user from settings, localhost-only)
 //
 // The provider fires `onDidChangeMcpServerDefinitions` when the URL,
 // user, tenant, or stored PAT changes so VS Code re-resolves the server.
 
 import * as vscode from 'vscode';
+
+import { buildAuthHeaders } from './agentHubMcpProviderCore';
 
 const SECRET_KEY_GITHUB_PAT = 'agentHubBridge.githubPat';
 
@@ -90,17 +92,9 @@ export class AgentHubMcpProvider
     const tenant = (cfg.get<string>('tenant') ?? '').trim();
     const pat = ((await this.context.secrets.get(SECRET_KEY_GITHUB_PAT)) ?? '').trim();
 
-    const headers: Record<string, string> = { ...server.headers };
-
-    if (tenant) {
-      headers['X-Tenant-Id'] = tenant;
-    }
-
-    if (pat) {
-      headers['Authorization'] = `Bearer ${pat}`;
-    } else if (user) {
-      headers['X-User-Id'] = user;
-    }
+    // Auth header logic lives in the vscode-free `./agentHubMcpProviderCore`
+    // module so it can be unit-tested without a VS Code extension-host shim.
+    const headers = buildAuthHeaders(pat, user, tenant);
 
     return new vscode.McpHttpServerDefinition(
       server.label,
