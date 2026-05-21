@@ -1,19 +1,22 @@
-// Copilot Chat participant — `@agent-hub` (issue #28, #45, #47).
+// Copilot Chat participant — `@agent-hub` (issue #28, #45, #47, #50).
 //
 // Registers a VS Code Chat participant so users can send DMs to
 // agent-hub participants directly from the Copilot Chat panel.
 //
-// Flow (issue #47 — picker + sticky handle):
-//   A. Handle present:  `@agent-hub @<handle> <body>`
-//      → parsePrompt succeeds → send + relay (PR #46 flow).
-//   B. No handle:       `@agent-hub <body>` or bare `@agent-hub`
-//      → participant picker (vscode.window.showQuickPick, online/offline)
-//      → if body is empty → showInputBox for message body
-//      → send + relay.
-//   Sticky handle: after every successful send, the recipient is
-//   remembered. On the next picker invocation it is pinned at position 0.
+// Recipient resolution priority (issue #50):
+//   1. Explicit handle:  `@agent-hub @<handle> <body>`  → parsePrompt
+//   2. Handle, no body:  `@agent-hub @<handle>`         → parseHandle + InputBox
+//   3. Sticky handle:    stickyHandle.value (last sender/recipient)
+//   4. Default handle:   agentHubBridge.defaultHandle setting
+//   5. Participant picker: vscode.window.showQuickPick
 //
-// Flow (relay — issue #45):
+// Sticky handle (issue #47/#50):
+//   - Updated to `to` after every successful send.
+//   - Updated to `msg.sender` whenever a DM is received (lmDispatcher).
+//   - Shared mutable ref — `extension.ts` owns the object; both
+//     `registerChatParticipant` and `LmDispatcher` hold a reference.
+//
+// Relay flow (issue #45):
 //   After send(), the handler awaits a reply (up to RELAY_TIMEOUT_MS).
 //   The inbox drain's tryResolve() resolves the waiter; the reply appears
 //   inline in the Chat panel. Timeout → "⏱ No reply within 60s".
@@ -56,17 +59,18 @@ const USAGE_MARKDOWN = [
  * @param autoStart    Called when no session is active; starts inbox watch.
  * @param log          Output-channel logger.
  * @param relayTracker Shared waiter map for Chat-panel reply relay (issue #45).
+ * @param stickyHandle Shared mutable ref updated by both the send path (after
+ *                     successful send) and the inbox drain (on every received DM).
+ *                     Owned by `extension.ts`; passed to `LmDispatcher` as well.
  */
 export function registerChatParticipant(
   context: vscode.ExtensionContext,
   getWatcher: () => InboxWatcher | undefined,
   autoStart: () => Promise<void>,
   log: (msg: string) => void,
-  relayTracker: RelayTracker
+  relayTracker: RelayTracker,
+  stickyHandle: { value: string | undefined }
 ): void {
-  // Sticky handle — persists across turns within a single extension session.
-  // Set to the recipient of the last successful send.
-  let lastHandle: string | undefined;
 
   const participant = vscode.chat.createChatParticipant(
     CHAT_PARTICIPANT_ID,
@@ -119,52 +123,57 @@ export function registerChatParticipant(
         if (!body) return; // empty submit — no-op
         log(`[chat] handle-only body=${JSON.stringify(body.slice(0, 80))}`);
       } else {
-        // C. Picker path: no handle at all (bare `@agent-hub` or body-only text).
-        //    Fetch participant list and show QuickPick.
-        log('[chat] no handle in prompt — showing participant picker');
+        // C. No explicit handle — resolve via sticky → defaultHandle → QuickPick.
+        const sticky = stickyHandle.value;
+        const defaultHandle =
+          vscode.workspace.getConfiguration('agentHubBridge').get<string>('defaultHandle')?.trim() ?? '';
 
-        let participants: Participant[];
-        try {
-          participants = await session.getParticipants();
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          log(`[chat] getParticipants failed: ${msg}`);
-          response.markdown(USAGE_MARKDOWN);
-          return;
-        }
+        if (sticky) {
+          // C1. Sticky: use the most recently contacted/received handle.
+          to = sticky;
+          log(`[chat] no handle — sticky: ${to}`);
+        } else if (defaultHandle) {
+          // C2. Default: use the agentHubBridge.defaultHandle setting.
+          to = defaultHandle;
+          log(`[chat] no handle — defaultHandle config: ${to}`);
+        } else {
+          // C3. QuickPick: fetch participant list and let the user choose.
+          log('[chat] no handle — showing participant picker');
 
-        if (token.isCancellationRequested) return;
-
-        // Sort: online first, then offline. Pin last-used handle at top.
-        const online = participants.filter((p) => p.isOnline);
-        const offline = participants.filter((p) => !p.isOnline);
-        const sorted = [...online, ...offline];
-        if (lastHandle) {
-          const idx = sorted.findIndex((p) => p.name === lastHandle);
-          if (idx > 0) {
-            const [pinned] = sorted.splice(idx, 1);
-            sorted.unshift(pinned as Participant);
+          let participants: Participant[];
+          try {
+            participants = await session.getParticipants();
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            log(`[chat] getParticipants failed: ${msg}`);
+            response.markdown(USAGE_MARKDOWN);
+            return;
           }
+
+          if (token.isCancellationRequested) return;
+
+          // Sort: online first, then offline.
+          const online = participants.filter((p) => p.isOnline);
+          const offline = participants.filter((p) => !p.isOnline);
+          const sorted = [...online, ...offline];
+
+          const items: vscode.QuickPickItem[] = sorted.map((p) => ({
+            label: p.name,
+            description: p.isOnline ? '● online' : '○ offline',
+            detail: p.displayName ?? undefined,
+          }));
+
+          const picked = await vscode.window.showQuickPick(items, {
+            title: 'agent-hub: Select recipient',
+            placeHolder: 'Pick a participant to DM',
+            ignoreFocusOut: true,
+          });
+
+          if (!picked || token.isCancellationRequested) return;
+          to = picked.label;
         }
 
-        const items: vscode.QuickPickItem[] = sorted.map((p) => ({
-          label: p.name,
-          description: p.isOnline ? '● online' : '○ offline',
-          detail: p.displayName ?? undefined,
-        }));
-
-        const picked = await vscode.window.showQuickPick(items, {
-          title: 'agent-hub: Select recipient',
-          placeHolder: lastHandle
-            ? `Last: ${lastHandle} — pick or press Enter`
-            : 'Pick a participant to DM',
-          ignoreFocusOut: true,
-        });
-
-        if (!picked || token.isCancellationRequested) return;
-        to = picked.label;
-
-        // Body: use whatever the user already typed, or ask via input box.
+        // Body: use whatever the user typed in the prompt, or ask via InputBox.
         body = promptBody;
         if (!body) {
           const inputBody = await vscode.window.showInputBox({
@@ -177,14 +186,14 @@ export function registerChatParticipant(
           if (!body) return; // empty submit — no-op
         }
 
-        log(`[chat] picker: to=${to} body=${JSON.stringify(body.slice(0, 80))}`);
+        log(`[chat] resolved: to=${to} body=${JSON.stringify(body.slice(0, 80))}`);
       }
 
       // ── Send + relay wait ─────────────────────────────────────────────
       try {
         await session.send(to, body);
         // Update sticky handle only after a successful send (issue #47 Minor #1).
-        lastHandle = to;
+        stickyHandle.value = to;
         log(`[chat] sent to ${to}`);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);

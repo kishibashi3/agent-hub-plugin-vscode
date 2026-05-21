@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-05-22
+
+### Added
+- **Default handle setting + sticky reply mode ([#50](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/50))** — recipient resolution priority is now: explicit `@handle` → sticky handle → `agentHubBridge.defaultHandle` setting → QuickPick.
+- `agentHubBridge.defaultHandle` configuration key — set a default DM recipient; bare `@agent-hub` skips the picker when this is configured.
+- Sticky handle now also updates on every received DM (not just on send), so subsequent bare `@agent-hub` messages auto-reply to the most recent sender.
+
+### Changed
+- `src/lmDispatcher.ts` — `LmDispatcherDeps` gains `stickyHandle?: { value: string | undefined }`; `notifyOne()` writes `msg.sender` to it before relay/notification dispatch.
+- `src/chatParticipant.ts` — `registerChatParticipant` gains a `stickyHandle` parameter (replaces the closure-local `lastHandle`). Path C dispatch now checks `stickyHandle.value` → `defaultHandle` config → QuickPick in order.
+- `src/extension.ts` — module-level `stickyHandle` ref threaded into both `LmDispatcher` and `registerChatParticipant`.
+
 ## [0.10.0] — 2026-05-22
 
 ### Added

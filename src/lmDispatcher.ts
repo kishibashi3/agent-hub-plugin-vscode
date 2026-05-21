@@ -29,6 +29,12 @@ export interface LmDispatcherDeps {
    * there instead of being shown as a VS Code notification.
    */
   readonly relayTracker?: RelayTracker;
+  /**
+   * Shared sticky-handle reference (issue #50). When set, `notifyOne` writes
+   * `msg.sender` here so that the Chat participant auto-addresses future
+   * bare `@agent-hub` messages to the most recent DM sender.
+   */
+  readonly stickyHandle?: { value: string | undefined };
 }
 
 function truncate(text: string, max: number): string {
@@ -108,6 +114,15 @@ export class LmDispatcher {
     this.deps.log(
       `[inbox] from=${msg.sender} id=${msg.id}: ${truncate(msg.body, 80)}`
     );
+
+    // Sticky-handle update (issue #50): update on every received DM so the
+    // Chat participant auto-addresses the next bare `@agent-hub` message to
+    // the most recent sender. Runs before relay/notification so the handle
+    // is always fresh regardless of which path handles the message.
+    if (this.deps.stickyHandle) {
+      this.deps.stickyHandle.value = msg.sender;
+      this.deps.log(`[sticky] lastHandle \u2192 ${msg.sender}`);
+    }
 
     // Chat-relay intercept (issue #45): if the Chat participant is awaiting a
     // reply from this sender, hand the message to the relay waiter so it
