@@ -148,7 +148,11 @@ export class InboxWatcher {
   private bindSession(auth: AuthContext, sessionId: string): void {
     const sdkConfig: SdkConfig = {
       user: auth.userId,
-      displayName: null,
+      // Surface a human-readable name in `get_participants` so operators
+      // can confirm the bridge is live without inspecting raw user IDs.
+      // "VS Code bridge" is intentionally generic — a future config key
+      // (`agentHubBridge.displayName`) can override this if needed.
+      displayName: 'VS Code bridge',
       mode: 'stateful',
       tenant: this.cfg.tenant || null,
       url: this.cfg.url,
@@ -156,6 +160,28 @@ export class InboxWatcher {
     };
     const client = createVscodeFetchMcpClient(this.cfg.url, auth, sessionId);
     this.currentSession = new HubSession(client, sdkConfig);
+  }
+
+  /**
+   * Register (or re-register) the bridge in the agent-hub participant
+   * registry so it appears in `get_participants`.
+   *
+   * Called once after the initial subscribe and once after each reconnect
+   * because a server restart wipes the in-memory registry. Failures are
+   * non-fatal — the watcher continues running; the bridge is simply not
+   * visible in `get_participants` until the next successful re-register.
+   */
+  private async registerSelf(context: string): Promise<void> {
+    if (!this.currentSession) {
+      return;
+    }
+    try {
+      await this.currentSession.register();
+      this.log(`[register] visible in get_participants (${context})`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.log(`[WARN] register failed (${context}): ${msg} — bridge may be invisible in get_participants`);
+    }
   }
 
   /**
@@ -222,6 +248,9 @@ export class InboxWatcher {
       this.log(
         `subscribed: inbox://@${auth.userId} (sessionId=${sessionId.slice(0, 8)}...) — waiting for pushes`
       );
+      // Register in the participant registry so the bridge appears in
+      // `get_participants`. Non-fatal: see `registerSelf` doc-comment.
+      await this.registerSelf('initial start');
     } catch (err) {
       this.running = false;
       this.abortController = undefined;
@@ -283,6 +312,10 @@ export class InboxWatcher {
           this.log(
             `subscribed: inbox://@${auth.userId} (sessionId=${sessionId.slice(0, 8)}..., re-established)`
           );
+          // Re-register after reconnect: the server's in-memory registry
+          // is wiped on restart, so an earlier registration may no longer
+          // be present. Non-fatal: see `registerSelf` doc-comment.
+          await this.registerSelf('reconnect');
         }
         // Re-subscribed successfully → reset the back-off so a transient
         // blip after a long stable run doesn't immediately wait the full
