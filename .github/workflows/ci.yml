@@ -119,7 +119,7 @@ jobs:
         working-directory: agent-hub-bridge-vscode
         run: npm ci
 
-      - name: Compile (vsce won't run vscode:prepublish without out/)
+      - name: Compile (esbuild dev bundle → dist/extension.js)
         working-directory: agent-hub-bridge-vscode
         run: npm run compile
 
