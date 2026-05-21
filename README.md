@@ -4,7 +4,7 @@
 
 IDE-bound bridge for [agent-hub](https://github.com/kishibashi3/agent-hub). Runs as a VS Code extension and relays DMs into the VS Code Language Model API (Copilot Chat), with IDE context (active editor, selection, diagnostics) auto-attached.
 
-> **Status:** complete (issue [#1](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/1) — scaffold + SSE inbox watch + LM bridging + IDE-context auto-attach + `send_message` reply relay). Follow-ups shipped: CI ([#7](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/7)), SecretStorage migration ([#9](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/9)), git-diff attach ([#11](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/11)), multi-pane + notebook awareness ([#13](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/13)). Remaining: `.vsix` packaging / release tagging, ESLint.
+> **Status:** complete. Shipped: scaffold + SSE inbox watch + LM bridging + IDE-context auto-attach + reply relay ([#1](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/1)), CI ([#7](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/7)), SecretStorage migration ([#9](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/9)), git-diff attach ([#11](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/11)), multi-pane + notebook awareness ([#13](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/13)), build & release pipeline + ESLint ([#16](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/16), [#19](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/19)), SDK migration — `HubSession` / `IncomingMessage` from `@kishibashi3/agent-hub-sdk` ([#21](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/21)).
 
 ## Architecture
 
@@ -23,11 +23,12 @@ The source is split into a **vscode-free protocol / prompt-shaping core** and a 
 
 | File | Imports `vscode`? | Contents |
 |---|---|---|
-| `src/protocol.ts` | no | MCP types, constants, pure helpers (`extractJsonRpcResponse`, `extractTextContent`, `nextBackoffMs`, `resolveAuth`, `isDefaultLocalhostUrl`) + `AgentHubClient` (uses only `fetch`) |
+| `src/protocol.ts` | no | MCP types, constants, pure helpers (`extractJsonRpcResponse`, `extractTextContent`, `nextBackoffMs`, `resolveAuth`, `isDefaultLocalhostUrl`). `AgentHubClient` and `InboxMessage` were retired in favour of the SDK ([#21](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/21)). |
+| `src/mcpClient.ts` | no | `createVscodeFetchMcpClient` factory — thin `McpClient` adapter that conforms the bridge's existing fetch + JSON-RPC transport to the `@kishibashi3/agent-hub-sdk` interface; preserves `.vsix` bundle size (no `@modelcontextprotocol/sdk` runtime dep). |
 | `src/promptFormat.ts` | no | `formatPrompt`, `formatIdeContext`, IDE-snapshot data types, `DEFAULT_IDE_CONTEXT_OPTIONS`, `EMPTY_IDE_CONTEXT_SNAPSHOT` |
-| `src/agentHub.ts` | yes | `InboxWatcher` (vscode.EventEmitter) — re-exports the protocol layer for surface compatibility |
+| `src/agentHub.ts` | yes | `InboxWatcher` (vscode.EventEmitter); exposes `session` getter (`HubSession \| null`) rebuilt per successful subscribe via `McpClient` adapter — re-exports the protocol layer for surface compatibility |
 | `src/ideContext.ts` | yes | `collectIdeContext` (vscode.window.activeTextEditor + vscode.languages.getDiagnostics) — re-exports the prompt-format layer |
-| `src/lmDispatcher.ts` | yes | `LmDispatcher` (vscode.lm.sendRequest) — re-exports `formatPrompt` |
+| `src/lmDispatcher.ts` | yes | `LmDispatcher` (vscode.lm.sendRequest) — calls `session.getUnread()` / `session.send()` / `session.ack()` — re-exports `formatPrompt` |
 | `src/extension.ts` | yes | `activate`/`deactivate`, command wiring, settings glue |
 
 ## Why VS Code Insiders?
@@ -97,10 +98,10 @@ Available under `agentHubBridge.*`:
 
 Each inbox notification triggers a serial drain:
 
-1. Fetch all unread messages via the `get_messages` MCP tool.
+1. Fetch all unread messages via `session.getUnread()` (wraps the `get_messages` MCP tool).
 2. For each message, snapshot IDE context (active editor URI / selection or cursor-window text / diagnostics — see `agentHubBridge.ideContext.*`), build a prompt (system prompt + IDE block + envelope + body), pick a chat model via `vscode.lm.selectChatModels`, and stream the response.
-3. **Reply relay**: on a non-empty LM response, call `send_message` to DM the response back to the original sender. The full response is also logged as a `[reply-sent]` breadcrumb in the output channel for audit / debug.
-4. **Ack only after a successful reply**: `mark_as_read` runs only when the relay succeeds. Any failure — no model available, LM consent denied, network error, relay error, `mark_as_read` error, watcher reconnecting mid-pipeline — leaves the message unread so the next drain retries it.
+3. **Reply relay**: on a non-empty LM response, call `session.send()` to DM the response back to the original sender. The full response is also logged as a `[reply-sent]` breadcrumb in the output channel for audit / debug.
+4. **Ack only after a successful reply**: `session.ack()` runs only when the relay succeeds. Any failure — no model available, LM consent denied, network error, relay error, `ack` error, watcher reconnecting mid-pipeline — leaves the message unread so the next drain retries it.
 
 The IDE context block looks roughly like:
 
@@ -193,8 +194,8 @@ At startup:
 | Mode | Settings | Server requirement |
 |---|---|---|
 | **trust** | `agentHubBridge.user` only | server `AUTH_MODE=trust` (localhost dev) |
-| **pat** | `agentHubBridge.githubPat` only | server `AUTH_MODE=pat`; handle = GitHub login |
-| **pat + override** | `agentHubBridge.githubPat` + `agentHubBridge.user` | server `AUTH_MODE=pat`; PAT owner + `X-User-Id` override |
+| **pat** | secret storage (`Set GitHub PAT` command) | server `AUTH_MODE=pat`; handle = GitHub login |
+| **pat + override** | secret storage + `agentHubBridge.user` | server `AUTH_MODE=pat`; PAT owner + `X-User-Id` override |
 
 Behaviour mirrors `kishibashi3-plugins-claude/.../agent-hub-plugin/skills/agent-hub/scripts/watch.sh`.
 
