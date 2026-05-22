@@ -136,9 +136,22 @@ export class LmDispatcher {
       return;
     }
 
+    // Show popup notification with "Open in Copilot" button (issue #63).
+    // Fire-and-forget: ack happens immediately regardless of button click so
+    // the inbox drains without waiting for the user to dismiss the popup.
     void vscode.window.showInformationMessage(
-      `agent-hub \u2014 ${msg.sender}: ${truncate(msg.body, 120)}`
-    );
+      `agent-hub \u2014 ${msg.sender}: ${truncate(msg.body, 120)}`,
+      'Copilot \u3067\u78ba\u8a8d'
+    ).then((action) => {
+      if (action === 'Copilot \u3067\u78ba\u8a8d') {
+        // Open Copilot Chat and prefill with a get_messages prompt so the
+        // user (or Copilot in agent mode) can immediately call the MCP tool.
+        void vscode.commands.executeCommand(
+          'workbench.action.chat.open',
+          '@agent-hub get_messages \u3057\u3066'
+        );
+      }
+    });
     await this.markRead(msg);
   }
 
