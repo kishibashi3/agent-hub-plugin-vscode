@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.1] — 2026-05-22
+
+### Added
+- **「Copilot で確認」ボタン ([#63](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/63))** — SSE inbox でメッセージ受信時のポップアップ通知に「Copilot で確認」ボタンを追加。クリックすると `workbench.action.chat.open` を実行し、`@agent-hub get_messages して` を prefill した状態で Copilot Chat を開く。v0.13.0 で登録済みの MCP `get_messages` tool を Copilot がすぐに呼べる。ack / mark-as-read はボタン操作に関わらず即時実行（fire & forget）。
+
 ## [0.13.0] — 2026-05-22
 
 ### Added
