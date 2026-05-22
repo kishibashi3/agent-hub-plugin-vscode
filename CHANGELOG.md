@@ -10,8 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.13.1] — 2026-05-22
 
-### Changed
-- **Inbox popup now includes "Copilot で確認" button ([#63](https://github.com/kishibashi3/agent-hub-plugin-vscode/issues/63))** — when an inbox DM arrives via SSE, the `showInformationMessage` popup shows a **"Copilot で確認"** action button. Clicking it runs `workbench.action.chat.open` with `@agent-hub get_messages して` prefilled, letting Copilot immediately call the `get_messages` MCP tool. Ack / mark-as-read happens immediately regardless of whether the button is clicked.
+### Added
+- **Inbox popup now includes "Copilot で確認" button ([#63](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/63))** — when an inbox DM arrives via SSE, the `showInformationMessage` popup shows a **"Copilot で確認"** action button. Clicking it runs `workbench.action.chat.open` with `@agent-hub get_messages して` prefilled, letting Copilot immediately call the `get_messages` MCP tool. Ack / mark-as-read happens immediately regardless of whether the button is clicked.
 
 ## [0.13.0] — 2026-05-22
 
