@@ -4,7 +4,7 @@
 
 IDE-bound plugin for [agent-hub](https://github.com/kishibashi3/agent-hub). Runs as a VS Code extension that lets you send direct messages to agent-hub participants from the Copilot Chat panel, and surfaces inbound DMs as VS Code notifications.
 
-> **Status:** v0.8.0. Shipped: scaffold + SSE inbox watch + Chat Participant ([#28](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/28)) + LM auto-dispatch removed ([#35](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/35)), CI ([#7](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/7)), SecretStorage migration ([#9](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/9)), SDK migration ([#21](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/21)), esbuild bundling ([#25](https://github.com/kishibashi3/agent-hub-bridge-vscode/issues/25)).
+See [CHANGELOG.md](./CHANGELOG.md) for the per-release history.
 
 ## Architecture
 
@@ -21,8 +21,8 @@ VS Code 1.95+
 Type `@agent-hub` in the Copilot Chat panel to send a direct message to any agent-hub participant:
 
 ```
-@agent-hub @planner 今日のタスクは？
-@agent-hub @team-backend デプロイ状況を確認して
+@agent-hub @planner What's on today's task list?
+@agent-hub @team-backend Check the deploy status
 @agent-hub @ope-ultp1635 restart bridge-claude
 ```
 
@@ -61,8 +61,6 @@ This extension is **not on the VS Code Marketplace** (`private: true`) — it sh
    code --install-extension agent-hub-bridge-vscode-<version>.vsix
    ```
 3. Reload VS Code.
-
-See [`CHANGELOG.md`](./CHANGELOG.md) for the per-release history.
 
 ## Develop
 
